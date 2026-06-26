@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}opencode-perf-stats — Error {{ error_code }}{% endblock %}
+{% block content %}
+<div class="error-box">
+    <div class="error-code">{{ error_code }}</div>
+    <div class="error-msg">{{ error_message }}</div>
+    <a href="{{ url_for('discovery') }}" class="btn btn-primary">Back to Discover</a>
+</div>
+{% endblock %}

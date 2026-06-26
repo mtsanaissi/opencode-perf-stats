@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}opencode-perf-stats — Aggregate{% endblock %}
+{% block content %}
+
+<h1>Aggregate Report</h1>
+
+<form class="form-row" method="get" action="{{ url_for('aggregate') }}">
+    <div class="form-field">
+        <label for="days">Days back</label>
+        <input type="number" id="days" name="days" min="0" value="{{ filters.days if filters.days is not none else '' }}" placeholder="all">
+    </div>
+    <div class="form-field">
+        <label for="model">Model (substring)</label>
+        <input type="text" id="model" name="model" value="{{ filters.model or '' }}" placeholder="e.g. mimo">
+    </div>
+    <div class="form-field">
+        <label for="final_only">Final only</label>
+        <select id="final_only" name="final_only">
+            <option value="" {{ 'selected' if not filters.final_only else '' }}>All messages</option>
+            <option value="1" {{ 'selected' if filters.final_only else '' }}>Final only</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="{{ url_for('aggregate') }}" class="btn">Reset</a>
+</form>
+
+{% if error %}
+<div class="empty">{{ error }}</div>
+{% else %}
+
+{% set ov = data.overview %}
+{% set tk = data.tokens %}
+{% set tps = data.tps.aggregate %}
+{% set ttft = data.ttft.aggregate %}
+<p class="subtitle">{{ filter_desc }} &mdash; {{ session_count }} session(s), {{ ov.message_count }} message(s)</p>
+
+<div class="grid">
+    <div class="card">
+        <div class="card-title">Sessions</div>
+        <div class="card-value">{{ session_count }}</div>
+        <div class="card-detail">{{ ov.message_count }} messages</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Total Cost</div>
+        <div class="card-value">${{ "%.4f"|format(tk.cost) }}</div>
+        <div class="card-detail">Cache hit: {{ "%.1f"|format(tk.cache_hit_pct) }}%</div>
+    </div>
+    <div class="card">
+        <div class="card-title">TPS Mean</div>
+        <div class="card-value">{{ "%.1f"|format(tps.mean) if tps.mean else '—' }}</div>
+        <div class="card-detail">Median: {{ "%.1f"|format(tps.median) if tps.median else '—' }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">TTFT Mean</div>
+        <div class="card-value" id="ttft-card">—</div>
+        <div class="card-detail" id="ttft-detail-card">—</div>
+    </div>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <div class="card-title">Input Tokens</div>
+        <div class="card-value">{{ "{:,}".format(tk.input) }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Output Tokens</div>
+        <div class="card-value">{{ "{:,}".format(tk.output) }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Cache Read</div>
+        <div class="card-value">{{ "{:,}".format(tk.cache_read) }}</div>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>Per-Model TPS</h2>
+    <canvas id="modelTpsChart"></canvas>
+</div>
+
+<div class="chart-container">
+    <h2>Per-Model Output Tokens</h2>
+    <canvas id="modelOutputChart"></canvas>
+</div>
+
+<div class="chart-container">
+    <h2>Per-Model Breakdown</h2>
+    <table>
+        <thead>
+            <tr><th>Model</th><th>Messages</th><th>Output Tokens</th><th>TPS Mean</th><th>TPS Median</th><th>Cost</th></tr>
+        </thead>
+        <tbody>
+        {% for r in data.per_model %}
+            <tr>
+                <td class="mono">{{ r.model }}</td>
+                <td>{{ "{:,}".format(r.messages) }}</td>
+                <td>{{ "{:,}".format(r.output_tokens) }}</td>
+                <td class="mono">{{ "%.1f"|format(r.tps_mean) if r.tps_mean is not none else '—' }}</td>
+                <td class="mono">{{ "%.1f"|format(r.tps_median) if r.tps_median is not none else '—' }}</td>
+                <td>${{ "%.4f"|format(r.cost) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="chart-container">
+    <h2>Top Sessions by Output Tokens</h2>
+    <canvas id="topSessionsChart"></canvas>
+</div>
+
+<div class="chart-container">
+    <h2>Top Sessions</h2>
+    <table>
+        <thead>
+            <tr><th>Session</th><th>Title</th><th>Model</th><th>Output</th><th>Cost</th><th>Duration</th></tr>
+        </thead>
+        <tbody>
+        {% for s in data.top_sessions %}
+            <tr>
+                <td class="mono"><a href="{{ url_for('session_report', session_id=s.id) }}">{{ s.id[:20] }}</a></td>
+                <td>{{ s.title }}</td>
+                <td class="mono">{{ s.model }}</td>
+                <td>{{ "{:,}".format(s.output_tokens) }}</td>
+                <td>${{ "%.4f"|format(s.cost) }}</td>
+                <td id="dur-{{ loop.index }}" data-ms="{{ (s.duration_seconds*1000) if s.duration_seconds else '' }}">—</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{% if data %}
+<script>
+const DATA = {{ data | tojson }};
+(function () {
+    const COLORS = ["#4dc9f6","#f67019","#f53794","#537bc4","#acc236"];
+    Chart.defaults.color='#8892a0'; Chart.defaults.borderColor='#2a3a5c';
+
+    const ttft = DATA.tts ? DATA.tts.aggregate : DATA.ttft.aggregate;
+    if (ttft.mean) {
+        document.getElementById('ttft-card').textContent = ttft.mean.toFixed(0)+'ms';
+        document.getElementById('ttft-detail-card').textContent = 'Median: '+(ttft.median?ttft.median.toFixed(0)+'ms':'—');
+    }
+    // duration cells
+    document.querySelectorAll('[data-ms]').forEach(el=>{
+        const ms=el.getAttribute('data-ms'); if(!ms)return; const n=parseFloat(ms); if(!n)return;
+        const sec=n/1000; if(sec<60)el.textContent=sec.toFixed(1)+'s'; else if(sec<3600){const m=sec/60;el.textContent=Math.floor(m)+'m '+(sec%60).toFixed(0)+'s';} else {const h=sec/3600;el.textContent=Math.floor(h)+'h '+Math.floor((sec%3600)/60)+'m';}
+    });
+
+    const labels = DATA.per_model.map(r=>r.model.split('/').pop().slice(0,20));
+    new Chart(document.getElementById('modelTpsChart'),{type:'bar',data:{labels,datasets:[{label:'TPS Mean',data:DATA.per_model.map(r=>r.tps_mean||0),backgroundColor:'#4dc9f6',borderRadius:4},{label:'TPS Median',data:DATA.per_model.map(r=>r.tps_median||0),backgroundColor:'#537bc4',borderRadius:4}]},options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true,title:{display:true,text:'Tokens/sec'}}}}});
+    new Chart(document.getElementById('modelOutputChart'),{type:'bar',data:{labels,datasets:[{label:'Output Tokens',data:DATA.per_model.map(r=>r.output_tokens),backgroundColor:'#acc236',borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:'Tokens'}}}}});
+
+    const tLab=DATA.top_sessions.map(s=>s.title.slice(0,25));
+    new Chart(document.getElementById('topSessionsChart'),{type:'bar',data:{labels:tLab,datasets:[{label:'Output Tokens',data:DATA.top_sessions.map(s=>s.output_tokens),backgroundColor:'#f67019',borderRadius:4}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,title:{display:true,text:'Tokens'}}}}});
+})();
+</script>
+{% endif %}
+{% endblock %}

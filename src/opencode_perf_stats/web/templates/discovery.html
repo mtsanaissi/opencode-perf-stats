@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}opencode-perf-stats — Discover{% endblock %}
+{% block content %}
+
+<!-- CTA cards -->
+<div class="cta-grid">
+    <a class="cta" href="{{ url_for('aggregate') }}">
+        <h3>Aggregate</h3>
+        <p>Summarise TPS, TTFT, tokens &amp; cost across many sessions over a date range or model.</p>
+    </a>
+    <a class="cta" href="{{ url_for('compare_landing') }}">
+        <h3>Compare</h3>
+        <p>Compare sessions, models, or date ranges side by side. Select 2–4 sessions below to get started.</p>
+    </a>
+    <a class="cta" href="{{ url_for('session_report', session_id=sessions[0].id) if sessions else '#' }}">
+        <h3>Latest session</h3>
+        <p>Open the most recently updated session report with per-message charts.</p>
+    </a>
+</div>
+
+<h2>Discovery</h2>
+
+<form class="form-row" method="get" action="{{ url_for('discovery') }}">
+    <div class="form-field">
+        <label for="days">Days back</label>
+        <input type="number" id="days" name="days" min="0" value="{{ filters.days if filters.days is not none else '' }}" placeholder="all">
+    </div>
+    <div class="form-field">
+        <label for="model">Model (substring)</label>
+        <input type="text" id="model" name="model" value="{{ filters.model or '' }}" placeholder="e.g. mimo">
+    </div>
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="{{ url_for('discovery') }}" class="btn">Reset</a>
+</form>
+
+{% if sessions %}
+<table>
+    <thead>
+        <tr>
+            <th><input type="checkbox" id="select-all" title="select all"></th>
+            <th>Session ID</th>
+            <th>Title</th>
+            <th>Agent</th>
+            <th>Model</th>
+            <th>Output</th>
+            <th>Cost</th>
+            <th>Updated</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for s in sessions %}
+        <tr class="row-select" data-id="{{ s.id }}">
+            <td><input type="checkbox" class="row-check" value="{{ s.id }}"></td>
+            <td class="mono"><a href="{{ url_for('session_report', session_id=s.id) }}">{{ s.id[:24] }}…</a></td>
+            <td><a href="{{ url_for('session_report', session_id=s.id) }}">{{ s.title[:40] }}</a></td>
+            <td>{{ s.agent }}</td>
+            <td class="mono">{{ s.model }}</td>
+            <td class="mono">{{ "{:,}".format(s.tokens_output) }}</td>
+            <td class="mono">${{ "%.2f"|format(s.cost) }}</td>
+            <td class="mono">{{ s.updated[5:22] if s.updated != '—' else '—' }}</td>
+            <td><a href="{{ url_for('session_report', session_id=s.id) }}" class="btn">View</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<div class="basket" id="basket" style="display:none;">
+    <span><span class="basket-count" id="basket-count">0</span> session(s) selected</span>
+    <a id="basket-link" class="btn btn-primary" href="#">Compare selected</a>
+</div>
+{% else %}
+<div class="empty">No sessions match the given filters.</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

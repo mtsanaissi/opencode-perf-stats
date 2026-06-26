@@ -1,0 +1,2 @@
+[console_scripts]
+opencode-perf-stats = opencode_perf_stats.cli:main

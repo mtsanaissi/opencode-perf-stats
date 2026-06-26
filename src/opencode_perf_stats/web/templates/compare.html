@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}opencode-perf-stats — Compare{% endblock %}
+{% block content %}
+
+<h1>Comparison</h1>
+
+<form class="form-row" id="compare-form">
+    <div class="form-field">
+        <label>Type</label>
+        <select id="cmp-type">
+            <option value="sessions" {{ 'selected' if ctype == 'sessions' else '' }}>Sessions</option>
+            <option value="models" {{ 'selected' if ctype == 'models' else '' }}>Models</option>
+            <option value="days" {{ 'selected' if ctype == 'days' else '' }}>Date ranges</option>
+        </select>
+    </div>
+    <div class="form-field" id="field-ids">
+        <label for="cmp-ids">Session IDs (comma-separated)</label>
+        <input type="text" id="cmp-ids" value="{{ filters.ids or '' }}" placeholder="ses_a,ses_b" style="min-width:340px;">
+    </div>
+    <div class="form-field" id="field-names" style="display:none;">
+        <label for="cmp-names">Model names (comma-separated)</label>
+        <input type="text" id="cmp-names" value="{{ filters.names or '' }}" placeholder="mimo,claude" style="min-width:340px;">
+    </div>
+    <div class="form-field" id="field-values" style="display:none;">
+        <label for="cmp-values">Days back (comma-separated)</label>
+        <input type="text" id="cmp-values" value="{{ filters.values or '' }}" placeholder="7,30" style="min-width:340px;">
+    </div>
+    <button type="submit" class="btn btn-primary">Compare</button>
+</form>
+
+{% if data %}
+
+{% set items = data['items'] %}
+<p class="subtitle">{{ data.count }} item(s) compared</p>
+
+<div class="chart-container">
+    <h2>TPS Mean</h2>
+    <canvas id="tpsChart"></canvas>
+</div>
+
+<div class="chart-container">
+    <h2>TTFT Mean (ms)</h2>
+    <canvas id="ttftChart"></canvas>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <div class="chart-container">
+        <h2>Total Tokens</h2>
+        <canvas id="tokensChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h2>Cost</h2>
+        <canvas id="costChart"></canvas>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>Side-by-side Comparison</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Metric</th>
+                {% for it in items %}<th>{{ it.label }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+        {% set keys = [('tps_mean','TPS Mean'),('tps_median','TPS Median'),('ttft_mean','TTFT Mean'),('ttft_median','TTFT Median'),('tokens_input','Input Tokens'),('tokens_output','Output Tokens'),('tokens_reasoning','Reasoning Tokens'),('tokens_total','Total Tokens'),('cost','Cost'),('message_count','Messages'),('duration_seconds','Duration'),('finish_stop','Final (stop)'),('finish_tool_calls','Tool calls')] %}
+        {% for mkey, mlabel in keys %}
+            <tr>
+                <td>{{ mlabel }}</td>
+                {% for it in items %}
+                    <td class="mono">{{ _fmt(it.metrics, mkey) }}</td>
+                {% endfor %}
+            </tr>
+        {% endfor %}
+        {% if data.type == 'sessions' %}
+            <tr><td>Model</td>{% for it in items %}<td class="mono">{{ it.model }}</td>{% endfor %}</tr>
+        {% elif data.type in ('models','days') %}
+            <tr><td>Sessions</td>{% for it in items %}<td class="mono">{{ it.session_count }}</td>{% endfor %}</tr>
+        {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<div class="empty">Select a type and enter 2–4 items to compare.</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{% if data %}
+<script>
+const CMP = {{ data | tojson }};
+(function () {
+    const COLORS=["#4dc9f6","#f67019","#f53794","#537bc4","#acc236"];
+    Chart.defaults.color='#8892a0'; Chart.defaults.borderColor='#2a3a5c';
+    const labels = CMP.items.map(i=>i.label);
+    const colors = CMP.items.map((_,i)=>COLORS[i%COLORS.length]);
+    function bar(id,label,data,ylabel){ new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets:[{label,data,backgroundColor:colors,borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:ylabel}}}}}); }
+    bar('tpsChart','TPS',CMP.items.map(i=>i.metrics.tps_mean||0),'Tokens/sec');
+    bar('ttftChart','TTFT',CMP.items.map(i=>i.metrics.ttft_mean||0),'Milliseconds');
+    bar('tokensChart','Tokens',CMP.items.map(i=>i.metrics.tokens_total),'Tokens');
+    bar('costChart','Cost',CMP.items.map(i=>i.metrics.cost),'USD');
+})();
+</script>
+{% endif %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

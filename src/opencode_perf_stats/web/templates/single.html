@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}opencode-perf-stats — {{ data.session.title }}{% endblock %}
+{% block content %}
+
+{% set s = data.session %}
+{% set t = data.tokens %}
+{% set m = data.messages %}
+{% set tps = data.tps %}
+{% set ttft = data.ttft %}
+
+<h1>Session Report</h1>
+<p class="subtitle">{{ s.title }} &mdash; <span class="mono">{{ s.id }}</span></p>
+
+<div class="toggle" style="margin-bottom:1.5rem;">
+    <span style="color:var(--text-muted); margin-right:0.5rem; font-size:0.8rem; text-transform:uppercase;">Filter:</span>
+    <a href="{{ url_for('session_report', session_id=session_id) }}" class="{{ 'on' if not final_only else '' }}">All messages</a>
+    <a href="{{ url_for('session_report', session_id=session_id, final_only='1') }}" class="{{ 'on' if final_only else '' }}">Final only</a>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <div class="card-title">Model</div>
+        <div class="card-value" style="font-size:1.2rem">{{ s.provider }}/{{ s.model }}</div>
+        <div class="card-detail">Agent: {{ s.agent }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Duration</div>
+        <div class="card-value" style="font-size:1.5rem" id="dur-card">—</div>
+        <div class="card-detail">{{ s.created }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Total Cost</div>
+        <div class="card-value">${{ "%.4f"|format(t.cost) }}</div>
+        <div class="card-detail">Cache hit: {{ "%.1f"|format(t.cache_hit_pct) }}%</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Messages</div>
+        <div class="card-value">{{ m.total_assistant }}</div>
+        <div class="card-detail">{{ m.with_timing }} with timing &middot; {{ m.finish_stop }} final</div>
+    </div>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <div class="card-title">TPS Mean</div>
+        <div class="card-value">{{ "%.1f"|format(tps.aggregate.mean) if tps.aggregate.mean else '—' }}</div>
+        <div class="card-detail">Median: {{ "%.1f"|format(tps.aggregate.median) if tps.aggregate.median else '—' }} &middot; Range: {{ "%.1f"|format(tps.aggregate.min) if tps.aggregate.min else '—' }}–{{ "%.1f"|format(tps.aggregate.max) if tps.aggregate.max else '—' }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">TTFT Mean</div>
+        <div class="card-value" id="ttft-mean-card">—</div>
+        <div class="card-detail" id="ttft-detail-card">—</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Tokens</div>
+        <div class="card-value" style="font-size:1.3rem">{{ "{:,}".format(t.input + t.output + t.reasoning) }}</div>
+        <div class="card-detail">In: {{ "{:,}".format(t.input) }} &middot; Out: {{ "{:,}".format(t.output) }} &middot; Reason: {{ "{:,}".format(t.reasoning) }}</div>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>TPS per Message</h2>
+    <canvas id="tpsChart"></canvas>
+</div>
+
+<div class="chart-container">
+    <h2>TTFT per Message (ms)</h2>
+    <canvas id="ttftChart"></canvas>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <div class="chart-container">
+        <h2>Token Breakdown</h2>
+        <canvas id="tokenChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h2>Message Summary</h2>
+        <canvas id="msgChart"></canvas>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>Per-Message Details</h2>
+    <table>
+        <thead>
+            <tr><th>#</th><th>TPS</th><th>Output Tokens</th><th>Duration</th><th>TTFT</th><th>Finish</th><th>Note</th></tr>
+        </thead>
+        <tbody>
+        {% for d in tps.detail %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td class="mono">{{ "%.1f"|format(d.tps) if d.tps is not none else '—' }}</td>
+                <td>{{ "{:,}".format(d.output_tokens) }}</td>
+                <td class="mono" data-ms="{{ d.duration_ms if d.duration_ms else '' }}">—</td>
+                <td class="mono">{% set matches = ttft.detail | selectattr('message_id','equalto',d.message_id) | list %}{{ "%.0fms"|format(matches[0].ttft_ms) if matches else '—' }}</td>
+                <td>{{ d.finish }}</td>
+                <td>{% if d.low_confidence %}<span class="badge badge-orange">{{ d.low_confidence_reason or 'low-confidence' }}</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const REPORT = {{ data | tojson }};
+(function () {
+    const s = REPORT.session, t = REPORT.tokens, tps = REPORT.tps, ttft = REPORT.ttft;
+    const COLORS = ["#4dc9f6","#f67019","#f53794","#537bc4","#acc236"];
+
+    // Format cards.
+    function fmtDur(sec){ if(sec==null)return '—'; if(sec<60)return sec.toFixed(1)+'s'; if(sec<3600){const m=sec/60;return Math.floor(m)+'m '+(sec%60).toFixed(0)+'s';} const h=sec/3600; return Math.floor(h)+'h '+Math.floor((sec%3600)/60)+'m'; }
+    document.getElementById('dur-card').textContent = fmtDur(s.duration_seconds);
+    if (ttft.aggregate.mean) {
+        document.getElementById('ttft-mean-card').textContent = ttft.aggregate.mean.toFixed(0)+'ms';
+        document.getElementById('ttft-detail-card').textContent = 'Median: '+(ttft.aggregate.median?ttft.aggregate.median.toFixed(0)+'ms':'—')+' · Range: '+(ttft.aggregate.min?ttft.aggregate.min.toFixed(0)+'ms':'—')+'–'+(ttft.aggregate.max?ttft.aggregate.max.toFixed(0)+'ms':'—');
+    }
+    // table durations
+    document.querySelectorAll('[data-ms]').forEach(el=>{
+        const ms = el.getAttribute('data-ms'); if(!ms)return;
+        const n=parseFloat(ms); if(!n)return;
+        el.textContent = n<1000? n+'ms' : n<60000? (n/1000).toFixed(1)+'s' : (n/60000).toFixed(1)+'m';
+    });
+
+    Chart.defaults.color='#8892a0'; Chart.defaults.borderColor='#2a3a5c';
+
+    const tpsLabels = tps.detail.map((_,i)=>'#'+(i+1));
+    const tpsValues = tps.detail.map(d=>d.tps||0);
+    const tpsColors = tps.detail.map(d=>d.low_confidence?'#f67019':COLORS[0]);
+    new Chart(document.getElementById('tpsChart'),{type:'bar',data:{labels:tpsLabels,datasets:[{label:'TPS',data:tpsValues,backgroundColor:tpsColors,borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:'Tokens/sec'}}}}});
+
+    const tmap={}; ttft.detail.forEach(x=>tmap[x.message_id]=x.ttft_ms);
+    const tLabels=[],tVals=[]; tps.detail.forEach((d,i)=>{if(d.message_id in tmap){tLabels.push('#'+(i+1));tVals.push(tmap[d.message_id]);}});
+    new Chart(document.getElementById('ttftChart'),{type:'bar',data:{labels:tLabels,datasets:[{label:'TTFT (ms)',data:tVals,backgroundColor:'#537bc4',borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,title:{display:true,text:'Milliseconds'}}}}});
+
+    new Chart(document.getElementById('tokenChart'),{type:'doughnut',data:{labels:['Input','Output','Reasoning','Cache Read','Cache Write'],datasets:[{data:[t.input,t.output,t.reasoning,t.cache_read,t.cache_write],backgroundColor:COLORS,borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'bottom'}}}});
+    new Chart(document.getElementById('msgChart'),{type:'doughnut',data:{labels:['Final (stop)','Tool calls','Incomplete'],datasets:[{data:[REPORT.messages.finish_stop,REPORT.messages.finish_tool_calls,REPORT.messages.incomplete],backgroundColor:['#acc236','#f67019','#58595b'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'bottom'}}}});
+})();
+</script>
+{% endblock %}
