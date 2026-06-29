@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block title %}opencode-perf-stats — Trends{% endblock %}
+{% block content %}
+
+<h1>Time Analysis</h1>
+
+<form class="form-row" method="get" action="{{ url_for('trends') }}">
+    <div class="form-field">
+        <label for="days">Days back</label>
+        <input type="number" id="days" name="days" min="0" value="{{ filters.days if filters.days is not none else '' }}" placeholder="30">
+    </div>
+    <div class="form-field">
+        <label for="model">Model</label>
+        <input type="text" id="model" name="model" list="model-list"
+               value="{{ filters.model or '' }}" placeholder="e.g. xiaomi/mimo-v2.5-pro"
+               autocomplete="off">
+        <datalist id="model-list">
+            {% for m in models %}
+            <option value="{{ m.identity }}">{{ m.identity }} ({{ m.count }})</option>
+            {% endfor %}
+        </datalist>
+    </div>
+    <div class="form-field">
+        <label for="period">Period</label>
+        <select id="period" name="period">
+            {% for p in ['day','week','month','year'] %}
+            <option value="{{ p }}" {{ 'selected' if filters.period == p else '' }}>{{ p | capitalize }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-field">
+        <label for="final_only">Final only</label>
+        <select id="final_only" name="final_only">
+            <option value="" {{ 'selected' if not filters.final_only else '' }}>All messages</option>
+            <option value="1" {{ 'selected' if filters.final_only else '' }}>Final only</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Apply</button>
+    <a href="{{ url_for('trends') }}" class="btn">Reset</a>
+</form>
+
+{% if error %}
+<div class="empty">{{ error }}</div>
+{% else %}
+
+<p class="subtitle">{{ filter_desc }} &mdash; {{ data.period | capitalize }} view &mdash; {{ data.session_count }} session(s), {{ data.message_count }} message(s)</p>
+
+<p class="subtitle">Per-model series: {{ data.models | length }} model(s){% if data.models %} &mdash; {{ data.models | join(', ') }}{% endif %}</p>
+
+{# Stacked charts: each metric in its own container with an independent toggle.
+   The shared Period selector above drives all charts (server-rendered on submit). #}
+
+<div class="chart-toolbar">
+    <label class="toggle-all"><input type="checkbox" id="toggle-all-charts" checked> Show all charts</label>
+</div>
+
+<div class="chart-container">
+    <div class="chart-header">
+        <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="tpsChart" checked> TPS p50/p95</label>
+    </div>
+    <canvas id="tpsChart"></canvas>
+</div>
+
+<div class="chart-container">
+    <div class="chart-header">
+        <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="ttftChart" checked> TTFT p50/p95 (ms)</label>
+    </div>
+    <canvas id="ttftChart"></canvas>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <div class="chart-container">
+        <div class="chart-header">
+            <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="tokensTotalChart" checked> Total Tokens</label>
+        </div>
+        <canvas id="tokensTotalChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <div class="chart-header">
+            <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="tokensOutputChart" checked> Output Tokens</label>
+        </div>
+        <canvas id="tokensOutputChart"></canvas>
+    </div>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <div class="chart-container">
+        <div class="chart-header">
+            <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="costChart" checked> Cost</label>
+        </div>
+        <canvas id="costChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <div class="chart-header">
+            <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="sessionsChart" checked> Sessions</label>
+        </div>
+        <canvas id="sessionsChart"></canvas>
+    </div>
+</div>
+
+<div class="chart-container">
+    <div class="chart-header">
+        <label class="chart-toggle"><input type="checkbox" class="chart-toggle-check" data-chart="messagesChart" checked> Messages</label>
+    </div>
+    <canvas id="messagesChart"></canvas>
+</div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{% if data %}
+<script>
+const TRENDS = {{ data | tojson }};
+(function () {
+    const COLORS = ["#4dc9f6","#f67019","#f53794","#537bc4","#acc236","#166a8f","#00a950","#8549ba","#e6194b","#3cb44b"];
+    Chart.defaults.color = '#8892a0';
+    Chart.defaults.borderColor = '#2a3a5c';
+
+    const labels = TRENDS.buckets.map(b => b.label);
+
+    // Build one dataset per model. `metric` selects which bucket field; for
+    // latency metrics (tps/ttft) we also add a p95 dataset alongside p50.
+    function modelSeries(metric) {
+        return TRENDS.models.map(function (model, i) {
+            return {
+                label: model.split('/').pop().slice(0, 24),
+                data: TRENDS.buckets.map(function (b) {
+                    return ((b.by_model || {})[model] || {})[metric] || 0;
+                }),
+                backgroundColor: COLORS[i % COLORS.length],
+                borderRadius: 4,
+            };
+        });
+    }
+
+    function latencySeries(base, p95) {
+        // Two grouped datasets per model (p50 solid, p95 hatched-ish) so the
+        // x-axis stays calendar-sorted rather than doubled.
+        var p50 = TRENDS.models.map(function (model, i) {
+            return {
+                label: model.split('/').pop().slice(0, 24) + ' (p50)',
+                data: TRENDS.buckets.map(function (b) {
+                    return ((b.by_model || {})[model] || {})[base] || 0;
+                }),
+                backgroundColor: COLORS[i % COLORS.length],
+                borderRadius: 4,
+            };
+        });
+        var p95ds = TRENDS.models.map(function (model, i) {
+            return {
+                label: model.split('/').pop().slice(0, 24) + ' (p95)',
+                data: TRENDS.buckets.map(function (b) {
+                    return ((b.by_model || {})[model] || {})[p95] || 0;
+                }),
+                backgroundColor: COLORS[i % COLORS.length] + '99',
+                borderRadius: 4,
+            };
+        });
+        return p50.concat(p95ds);
+    }
+
+    function makeBar(id, datasets, ylabel, stacked) {
+        var ctx = document.getElementById(id);
+        if (!ctx) return;
+        new Chart(ctx, {
+            type: 'bar',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { stacked: !!stacked },
+                    y: { beginAtZero: true, title: { display: true, text: ylabel }, stacked: !!stacked }
+                }
+            }
+        });
+    }
+
+    // Latency (grouped, not stacked — you can't sum p50s meaningfully).
+    makeBar('tpsChart', latencySeries('tps_p50', 'tps_p95'), 'Tokens/sec', false);
+    makeBar('ttftChart', latencySeries('ttft_p50', 'ttft_p95'), 'Milliseconds', false);
+    // Volumes (stacked per model).
+    makeBar('tokensTotalChart', modelSeries('tokens_total'), 'Tokens', true);
+    makeBar('tokensOutputChart', modelSeries('tokens_output'), 'Tokens', true);
+    makeBar('costChart', modelSeries('cost'), 'USD', true);
+    makeBar('sessionsChart', modelSeries('session_count'), 'Sessions', true);
+    makeBar('messagesChart', modelSeries('message_count'), 'Messages', true);
+
+    // Per-chart toggle: hide/show the chart container without re-fetching.
+    document.querySelectorAll('.chart-toggle-check').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            var id = cb.getAttribute('data-chart');
+            var wrap = cb.closest('.chart-container');
+            if (wrap) wrap.style.display = cb.checked ? '' : 'none';
+            syncToggleAll();
+        });
+    });
+
+    var toggleAll = document.getElementById('toggle-all-charts');
+    if (toggleAll) {
+        toggleAll.addEventListener('change', function () {
+            var on = toggleAll.checked;
+            document.querySelectorAll('.chart-toggle-check').forEach(function (cb) {
+                cb.checked = on;
+                var wrap = cb.closest('.chart-container');
+                if (wrap) wrap.style.display = on ? '' : 'none';
+            });
+        });
+    }
+
+    function syncToggleAll() {
+        if (!toggleAll) return;
+        var all = document.querySelectorAll('.chart-toggle-check');
+        var onCount = Array.prototype.filter.call(all, function (cb) { return cb.checked; }).length;
+        toggleAll.checked = onCount === all.length;
+    }
+})();
+</script>
+{% endif %}
+{% endblock %}

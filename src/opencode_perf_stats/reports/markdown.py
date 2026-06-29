@@ -43,6 +43,16 @@ def build_report_data(
             "finish": m["finish"],
             "low_confidence": m["low_confidence"],
             "low_confidence_reason": m["low_confidence_reason"],
+            # Extra fields for expandable row detail.
+            "input_tokens": m["input_tokens"],
+            "reasoning_tokens": m["reasoning_tokens"],
+            "cache_read": m["cache_read"],
+            "cache_write": m["cache_write"],
+            "cost": round(m["cost"], 4),
+            "created_ms": m["created"],
+            "completed_ms": m["completed"],
+            "model_id": m["model_id"],
+            "provider_id": m["provider_id"],
         })
 
     ttft_detail = []
@@ -269,15 +279,31 @@ def build_aggregate_data(
         key = f"{m['provider_id']}/{m['model_id']}"
         by_model.setdefault(key, []).append(m)
 
+    # ttft_rows carry only message_id (no model); index for per-model grouping.
+    ttft_by_msg = {t["message_id"]: t["ttft_ms"] for t in ttft_rows}
+
     model_rows = []
     for key, msgs in sorted(by_model.items(), key=lambda kv: -sum(x["output_tokens"] for x in kv[1])):
         tps_vals = [x["tps"] for x in msgs if x["tps"] is not None and not x["low_confidence"]]
+        model_ttft = [ttft_by_msg[x["id"]] for x in msgs if x["id"] in ttft_by_msg]
+        tps_stats = aggregate(tps_vals)
+        ttft_stats = aggregate(model_ttft)
         model_rows.append({
             "model": key,
             "messages": len(msgs),
             "output_tokens": sum(x["output_tokens"] for x in msgs),
-            "tps_mean": round(statistics.mean(tps_vals), 1) if tps_vals else None,
-            "tps_median": round(statistics.median(tps_vals), 1) if tps_vals else None,
+            # JSON backward-compat (kept; UI hides these for latency metrics).
+            "tps_mean": round(tps_stats["mean"], 1) if tps_stats["mean"] is not None else None,
+            "tps_median": round(tps_stats["median"], 1) if tps_stats["median"] is not None else None,
+            # UI-facing latency pair (p50/p95).
+            "tps_p50": round(tps_stats["median"], 1) if tps_stats["median"] is not None else None,
+            "tps_p95": round(tps_stats["p95"], 1) if tps_stats["p95"] is not None else None,
+            "tps_low_n": tps_stats["low_n"],
+            "ttft_mean": round(ttft_stats["mean"]) if ttft_stats["mean"] is not None else None,
+            "ttft_median": round(ttft_stats["median"]) if ttft_stats["median"] is not None else None,
+            "ttft_p50": round(ttft_stats["median"]) if ttft_stats["median"] is not None else None,
+            "ttft_p95": round(ttft_stats["p95"]) if ttft_stats["p95"] is not None else None,
+            "ttft_low_n": ttft_stats["low_n"],
             "cost": round(sum(x["cost"] for x in msgs), 4),
         })
 
@@ -367,12 +393,14 @@ def render_aggregate_markdown(data: dict) -> str:
 
     model_rows = data["per_model"]
     lines.append("## Per-model breakdown")
-    lines.append("| Model | Messages | Output tokens | TPS mean | TPS median | Cost |")
-    lines.append("|-------|----------|---------------|----------|------------|------|")
+    lines.append("| Model | Messages | Output tokens | TPS p50 | TPS p95 | TTFT p50 | TTFT p95 | Cost |")
+    lines.append("|-------|----------|---------------|---------|---------|----------|----------|------|")
     for r in model_rows:
-        tps_m = f"{r['tps_mean']:.1f}" if r["tps_mean"] is not None else "—"
-        tps_med = f"{r['tps_median']:.1f}" if r["tps_median"] is not None else "—"
-        lines.append(f"| {r['model']} | {r['messages']:,} | {r['output_tokens']:,} | {tps_m} | {tps_med} | ${r['cost']:.4f} |")
+        tps_p50 = f"{r['tps_p50']:.1f}" if r["tps_p50"] is not None else "—"
+        tps_p95 = f"{r['tps_p95']:.1f}" + (" ⚠" if r.get("tps_low_n") else "") if r["tps_p95"] is not None else "—"
+        ttft_p50 = f"{r['ttft_p50']:.0f}ms" if r["ttft_p50"] is not None else "—"
+        ttft_p95 = f"{r['ttft_p95']:.0f}ms" + (" ⚠" if r.get("ttft_low_n") else "") if r["ttft_p95"] is not None else "—"
+        lines.append(f"| {r['model']} | {r['messages']:,} | {r['output_tokens']:,} | {tps_p50} | {tps_p95} | {ttft_p50} | {ttft_p95} | ${r['cost']:.4f} |")
     lines.append("")
 
     top_sessions = data["top_sessions"]

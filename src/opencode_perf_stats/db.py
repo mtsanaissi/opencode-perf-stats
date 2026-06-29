@@ -38,16 +38,29 @@ def connect(db_path: str) -> sqlite3.Connection:
 # ── filter helpers ────────────────────────────────────────────────────────────
 
 def build_session_filter(args) -> tuple[str, list]:
-    """Build a WHERE clause fragment + params for --days/--model on the session table."""
+    """Build a WHERE clause fragment + params for --days/--model on the session table.
+
+    Model filter matches against the ``provider/model`` identity format
+    (e.g. ``xiaomi/mimo-v2.5-pro``).  Falls back to matching just the model ID
+    when the filter string contains no ``/``.
+    """
     clauses: list[str] = []
     params: list = []
     if args.days is not None:
         clauses.append("time_created > strftime('%s','now',?) * 1000")
         params.append(f"-{int(args.days)} days")
     if args.model is not None:
-        # LIKE on the JSON-extracted model ID, case-insensitive.
-        clauses.append("LOWER(json_extract(model, '$.id')) LIKE LOWER(?)")
-        params.append(f"%{args.model}%")
+        if "/" in args.model:
+            # provider/model format: match providerID + model.id together
+            provider, model_part = args.model.split("/", 1)
+            clauses.append(
+                "LOWER(json_extract(model, '$.providerID') || '/' || json_extract(model, '$.id')) LIKE LOWER(?)"
+            )
+            params.append(f"%{provider}/{model_part}%")
+        else:
+            # Backward-compat: match just model ID substring
+            clauses.append("LOWER(json_extract(model, '$.id')) LIKE LOWER(?)")
+            params.append(f"%{args.model}%")
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
@@ -234,12 +247,15 @@ def fetch_matching_sessions(conn: sqlite3.Connection, where: str, params: list) 
     out = []
     for r in rows:
         model_raw = json.loads(r["model"]) if r["model"] else {}
+        provider = model_raw.get("providerID", "(unknown)")
+        model_id = model_raw.get("id", "(unknown)")
         out.append({
             "id": r["id"],
             "title": r["title"] or "(untitled)",
             "agent": r["agent"] or "(unknown)",
-            "model": model_raw.get("id", "(unknown)"),
-            "provider": model_raw.get("providerID", "(unknown)"),
+            "model": model_id,
+            "provider": provider,
+            "model_identity": f"{provider}/{model_id}",
             "cost": r["cost"] or 0.0,
             "tokens_input": r["tokens_input"] or 0,
             "tokens_output": r["tokens_output"] or 0,
@@ -378,12 +394,15 @@ def fetch_discovery_sessions(
     out = []
     for r in rows:
         model_raw = json.loads(r["model"]) if r["model"] else {}
+        provider = model_raw.get("providerID", "(unknown)")
+        model_id = model_raw.get("id", "(unknown)")
         out.append({
             "id": r["id"],
             "title": r["title"] or "(untitled)",
             "agent": r["agent"] or "(unknown)",
-            "model": model_raw.get("id", "(unknown)"),
-            "provider": model_raw.get("providerID", "(unknown)"),
+            "model": model_id,
+            "provider": provider,
+            "model_identity": f"{provider}/{model_id}",
             "tokens_output": r["tokens_output"] or 0,
             "tokens_input": r["tokens_input"] or 0,
             "cost": r["cost"] or 0.0,
@@ -392,5 +411,86 @@ def fetch_discovery_sessions(
             # pre-formatted for display convenience
             "created": fmt_ts(r["time_created"]),
             "updated": fmt_ts(r["time_updated"]),
+        })
+    return out
+
+
+def fetch_message_parts(conn: sqlite3.Connection, message_id: str) -> list[dict]:
+    """Fetch all content-bearing parts for a given assistant message.
+
+    Returns a list of dicts with ``type`` and content fields.  Only
+    content-bearing types (text, reasoning, tool, etc.) are included;
+    timing-only parts are skipped.  Unknown types carry a raw ``data``
+    preview so the frontend can fall back gracefully.
+
+    The caller MUST validate that ``message_id`` belongs to the expected
+    session before calling this function.
+    """
+    rows = conn.execute(
+        """SELECT json_extract(p.data, '$.type') as ptype, p.data
+           FROM part p
+           WHERE p.message_id = ?
+           ORDER BY p.time_created""",
+        (message_id,),
+    ).fetchall()
+
+    parts = []
+    for r in rows:
+        ptype = r["ptype"] or "unknown"
+        raw = json.loads(r["data"]) if r["data"] else {}
+
+        try:
+            if ptype == "text":
+                text = raw.get("text", "")
+                parts.append({"type": "text", "text": text})
+            elif ptype == "reasoning":
+                text = raw.get("text", "") or raw.get("reasoning", "")
+                parts.append({"type": "reasoning", "text": text})
+            elif ptype == "tool-call":
+                parts.append({
+                    "type": "tool-call",
+                    "name": raw.get("name", raw.get("tool", "(unknown)")),
+                    "input": raw.get("input", raw.get("arguments", "")),
+                })
+            elif ptype == "tool-result":
+                parts.append({
+                    "type": "tool-result",
+                    "name": raw.get("name", raw.get("tool", "(unknown)")),
+                    "output": raw.get("output", raw.get("result", "")),
+                })
+            else:
+                # Unknown type — include raw data preview for the frontend.
+                parts.append({"type": ptype, "raw": json.dumps(raw, default=str)[:5000]})
+        except Exception:
+            # Malformed JSON — still return something useful.
+            parts.append({"type": ptype, "raw": r["data"][:5000] if r["data"] else ""})
+
+    return parts
+
+
+def fetch_distinct_models(conn: sqlite3.Connection) -> list[dict]:
+    """Return distinct ``provider/model`` identities with session counts.
+
+    Each entry: ``{"identity": "provider/model", "provider": ..., "model": ..., "count": int}``.
+    """
+    rows = conn.execute(
+        """SELECT json_extract(model, '$.providerID') as provider,
+                  json_extract(model, '$.id') as model_id,
+                  COUNT(*) as cnt
+           FROM session
+           WHERE model IS NOT NULL AND tokens_input > 0
+           GROUP BY provider, model_id
+           ORDER BY cnt DESC"""
+    ).fetchall()
+
+    out = []
+    for r in rows:
+        provider = r["provider"] or "(unknown)"
+        model_id = r["model_id"] or "(unknown)"
+        out.append({
+            "identity": f"{provider}/{model_id}",
+            "provider": provider,
+            "model": model_id,
+            "count": r["cnt"],
         })
     return out

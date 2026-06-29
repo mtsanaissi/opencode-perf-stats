@@ -1,5 +1,12 @@
-/* opencode-perf-stats web UI — selection basket + compare form toggle.
- * Vanilla JS, no dependencies. Persists selected session IDs in sessionStorage.
+/* opencode-perf-stats web UI — selection basket, compare pickers, message table.
+ * Vanilla JS, no dependencies. Persists compare pick selections in
+ * sessionStorage (distinct keys per basket). No client-side fetch: pickers are
+ * server-rendered; JS only wires up tab switching, sticky "Compare selected"
+ * bars, and date-range preset/custom merging.
+ *
+ * Two modules:
+ *   1. discovery selection basket + compare picker bars (always runs)
+ *   2. per-message table pagination + accordion (only on #msg-table-wrap pages)
  */
 (function () {
     "use strict";
@@ -25,8 +32,6 @@
             onCheckChange();
         });
         updateBasket();
-
-        // Row click toggles via the link; let checkbox handle its own state.
     }
 
     function onCheckChange() {
@@ -59,46 +64,387 @@
         basketLink.setAttribute("data-base", basketLink.href);
     }
 
-    // ── compare form: type toggle ─────────────────────────────────────────────
-    var form = document.getElementById("compare-form");
-    var typeSelect = document.getElementById("cmp-type");
-    if (form && typeSelect) {
-        typeSelect.addEventListener("change", toggleFields);
-        toggleFields();
+    // ── compare: type tabs ───────────────────────────────────────────────────
+    var tabBtns = Array.prototype.slice.call(document.querySelectorAll(".tab-btn"));
+    var panels = {
+        sessions: document.getElementById("panel-sessions"),
+        models: document.getElementById("panel-models"),
+    };
 
-        form.addEventListener("submit", function (e) {
-            e.preventDefault();
-            var type = typeSelect.value;
-            var raw;
-            if (type === "sessions") raw = val("cmp-ids");
-            else if (type === "models") raw = val("cmp-names");
-            else raw = val("cmp-values");
-            var items = raw.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-            if (items.length < 2) {
-                alert("Enter at least 2 items to compare.");
-                return;
+    tabBtns.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var type = btn.getAttribute("data-type");
+            tabBtns.forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            Object.keys(panels).forEach(function (k) {
+                if (panels[k]) panels[k].style.display = k === type ? "" : "none";
+            });
+        });
+    });
+
+    // ── compare: generic checkbox basket (sessions & models) ─────────────────
+    // Pickers are server-rendered with active selection pre-checked. JS merges
+    // any sessionStorage-persisted selection, updates the sticky "Compare
+    // selected" bar, and builds the comparison URL.
+    function setupBasket(opts) {
+        var checks = Array.prototype.slice.call(
+            document.querySelectorAll('input.cmp-check[data-basket="' + opts.basket + '"]')
+        );
+        if (!checks.length) return;
+
+        var bar = document.getElementById(opts.barId);
+        var countEl = document.getElementById(opts.countId);
+        var link = document.getElementById(opts.linkId);
+
+        var saved = {};
+        try { saved = JSON.parse(sessionStorage.getItem(opts.storageKey) || "{}"); } catch (e) {}
+
+        checks.forEach(function (cb) {
+            // Merge persisted selection onto the server-rendered (active) state.
+            if (saved[cb.value]) cb.checked = true;
+            cb.addEventListener("change", function () {
+                persist();
+                update();
+            });
+        });
+
+        function persist() {
+            var s = {};
+            checks.forEach(function (cb) { if (cb.checked) s[cb.value] = true; });
+            try { sessionStorage.setItem(opts.storageKey, JSON.stringify(s)); } catch (e) {}
+        }
+
+        function update() {
+            var sel = checks.filter(function (cb) { return cb.checked; });
+            var n = sel.length;
+            if (countEl) countEl.textContent = n;
+            if (bar) bar.style.display = n > 0 ? "flex" : "none";
+            if (link) {
+                var ok = n >= opts.min;
+                link.classList.toggle("btn-primary", ok);
+                link.style.opacity = ok ? "1" : "0.5";
+                link.style.pointerEvents = ok ? "auto" : "none";
+                if (ok) {
+                    var vals = sel.map(function (cb) { return cb.value; }).join(",");
+                    link.href = link.getAttribute("data-base") + "?" + opts.param + "=" + encodeURIComponent(vals);
+                } else {
+                    link.href = "#";
+                }
             }
-            var param = type === "sessions" ? "ids" : type === "models" ? "names" : "values";
-            var path = type === "sessions" ? "/compare/sessions"
-                     : type === "models" ? "/compare/models" : "/compare/days";
-            window.location.href = path + "?" + param + "=" + encodeURIComponent(items.join(","));
+        }
+
+        update();
+    }
+
+    setupBasket({
+        basket: "sessions",
+        barId: "session-bar",
+        countId: "session-count",
+        linkId: "compare-sessions-btn",
+        param: "ids",
+        min: 2,
+        storageKey: "opencode-perf-stats:cmp-sessions",
+    });
+    setupBasket({
+        basket: "models",
+        barId: "model-bar",
+        countId: "model-count",
+        linkId: "compare-models-btn",
+        param: "names",
+        min: 2,
+        storageKey: "opencode-perf-stats:cmp-models",
+    });
+})();
+
+/* ── 2nd module: per-message table pagination + accordion rows ────────────
+ * Activates only when #msg-table-wrap is present (single.html report page).
+ * Pagination is purely client-side: all rows exist in DOM, we show/hide.
+ * Accordion: clicking a .msg-data-row toggles its sibling .msg-detail-row.
+ */
+(function () {
+    "use strict";
+
+    var wrap = document.getElementById("msg-table-wrap");
+    if (!wrap) return; // not the session report page
+
+    var tbody = document.getElementById("msg-tbody");
+    var pageNumTop = document.getElementById("page-num-top");
+    var pageTotalTop = document.getElementById("page-total-top");
+    var pageNumBottom = document.getElementById("page-num-bottom");
+    var pageTotalBottom = document.getElementById("page-total-bottom");
+    var prevBtn = document.getElementById("prev-page");
+    var nextBtn = document.getElementById("next-page");
+    var prevBtnBottom = document.getElementById("prev-page-bottom");
+    var nextBtnBottom = document.getElementById("next-page-bottom");
+    var perPage = document.getElementById("per-page");
+    var perPageBottom = document.getElementById("per-page-bottom");
+
+    // ── collect rows ──────────────────────────────────────────────────────
+    var allRows = Array.prototype.slice.call(tbody.querySelectorAll(".msg-data-row"));
+
+    function totalPages(nRows, pp) {
+        return Math.max(1, Math.ceil(nRows / pp));
+    }
+
+    function updatePagination(page, pp) {
+        var total = totalPages(allRows.length, pp);
+        // Clamp
+        if (page < 1) page = 1;
+        if (page > total) page = total;
+
+        var start = (page - 1) * pp;
+        var end = Math.min(start + pp, allRows.length);
+
+        // Show/hide data rows
+        allRows.forEach(function (row, i) {
+            var visible = i >= start && i < end;
+            row.style.display = visible ? "" : "none";
+            // Hide its detail row when the data row is hidden
+            var detail = document.getElementById("msg-detail-" + (i + 1));
+            if (detail && !visible) {
+                detail.hidden = true;
+                row.setAttribute("aria-expanded", "false");
+            }
+        });
+
+        // Update page numbers
+        var text = "" + page;
+        pageNumTop.textContent = text;
+        pageNumBottom.textContent = text;
+        text = "" + total;
+        pageTotalTop.textContent = text;
+        pageTotalBottom.textContent = text;
+
+        // Prev/next state
+        var atFirst = page <= 1;
+        var atLast = page >= total;
+        prevBtn.disabled = atFirst;
+        nextBtn.disabled = atLast;
+        prevBtnBottom.disabled = atFirst;
+        nextBtnBottom.disabled = atLast;
+
+        return page;
+    }
+
+    // ── synchronise the two per-page selects ──────────────────────────────
+    function syncPerPage(from, to) {
+        if (from.value !== to.value) {
+            to.value = from.value;
+        }
+    }
+
+    function onPerPageChange() {
+        syncPerPage(perPage, perPageBottom);
+        syncPerPage(perPageBottom, perPage);
+        currentPage = updatePagination(1, parseInt(perPage.value, 10));
+    }
+
+    perPage.addEventListener("change", onPerPageChange);
+    perPageBottom.addEventListener("change", onPerPageChange);
+
+    // ── prev/next ─────────────────────────────────────────────────────────
+    function onPrev() {
+        var pp = parseInt(perPage.value, 10);
+        currentPage = updatePagination(currentPage - 1, pp);
+    }
+    function onNext() {
+        var pp = parseInt(perPage.value, 10);
+        currentPage = updatePagination(currentPage + 1, pp);
+    }
+
+    prevBtn.addEventListener("click", onPrev);
+    nextBtn.addEventListener("click", onNext);
+    prevBtnBottom.addEventListener("click", onPrev);
+    nextBtnBottom.addEventListener("click", onNext);
+
+    // ── keyboard on prev/next buttons (already natively <button>) ─────────
+
+    // ── accordion: row click toggle ───────────────────────────────────────
+    function toggleRow(row) {
+        // The detail row is the <tr> immediately following this data row.
+        var detail = row.nextElementSibling;
+        if (!detail || !detail.classList.contains("msg-detail-row")) return;
+
+        var expanded = row.getAttribute("aria-expanded") === "true";
+        if (expanded) {
+            detail.hidden = true;
+            row.setAttribute("aria-expanded", "false");
+        } else {
+            detail.hidden = false;
+            row.setAttribute("aria-expanded", "true");
+        }
+    }
+
+    function onRowClick(e) {
+        // Don't toggle if user clicked a link or button inside the row
+        if (e.target.closest("a, button, select, input, label")) return;
+        toggleRow(this);
+    }
+
+    function onRowKeydown(e) {
+        if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleRow(this);
+        }
+    }
+
+    allRows.forEach(function (row) {
+        row.addEventListener("click", onRowClick);
+        row.addEventListener("keydown", onRowKeydown);
+    });
+
+    // ── initialize ────────────────────────────────────────────────────────
+    var currentPage = 1;
+    var defaultPP = parseInt(perPage.value, 10);
+    currentPage = updatePagination(currentPage, defaultPP);
+})();
+
+/* ── 3rd module: message-content modal ────────────────────────────────
+ * Activates only when #msg-table-wrap with data-session-id is present
+ * (single.html report page). Creates a shared modal overlay on first
+ * use and lazy-fetches message parts via the session-scoped API.
+ */
+(function () {
+    "use strict";
+
+    var wrap = document.getElementById("msg-table-wrap");
+    if (!wrap || !wrap.getAttribute("data-session-id")) return;
+
+    var sessionId = wrap.getAttribute("data-session-id");
+    var modal = null;
+
+    function ensureModal() {
+        if (modal) return modal;
+        modal = document.createElement("div");
+        modal.className = "modal-overlay";
+        modal.hidden = true;
+        modal.innerHTML =
+            '<div class="modal-content">' +
+                '<button class="modal-close" aria-label="Close">&times;</button>' +
+                '<div class="modal-header"></div>' +
+                '<div class="modal-body"></div>' +
+            '</div>';
+        document.body.appendChild(modal);
+        modal.addEventListener("click", function (e) {
+            if (e.target === modal) closeModal();
+        });
+        modal.querySelector(".modal-close").addEventListener("click", closeModal);
+        return modal;
+    }
+
+    function openModal(messageId) {
+        ensureModal();
+        var body = modal.querySelector(".modal-body");
+        var header = modal.querySelector(".modal-header");
+        body.innerHTML = '<div class="loading">Loading message content…</div>';
+        header.innerHTML = '';
+        modal.hidden = false;
+        document.body.style.overflow = "hidden";
+
+        var url = "/session/" + encodeURIComponent(sessionId) +
+                  "/message/" + encodeURIComponent(messageId) + "/parts";
+        fetch(url)
+            .then(function (resp) {
+                if (!resp.ok) throw new Error("HTTP " + resp.status);
+                return resp.json();
+            })
+            .then(function (data) {
+                renderParts(body, data.parts || []);
+            })
+            .catch(function (err) {
+                body.innerHTML =
+                    '<div class="modal-error">' +
+                    '<p>Failed to load message content.</p>' +
+                    '<p class="mono">' + err.message + '</p>' +
+                    '</div>';
+            });
+    }
+
+    function closeModal() {
+        if (!modal) return;
+        modal.hidden = true;
+        document.body.style.overflow = "";
+    }
+
+    function renderParts(container, parts) {
+        if (!parts.length) {
+            container.innerHTML = '<p class="modal-empty">No content parts found.</p>';
+            return;
+        }
+        var html = "";
+        parts.forEach(function (part, i) {
+            var label = "";
+            var content = "";
+            if (part.type === "text") {
+                label = "Text";
+                content = '<pre class="modal-part-text">' + escapeHtml(part.text || "") + '</pre>';
+            } else if (part.type === "reasoning") {
+                label = "Reasoning";
+                content = '<details class="modal-part-reasoning"><summary>Show reasoning</summary>' +
+                           '<pre>' + escapeHtml(part.text || "") + '</pre></details>';
+            } else if (part.type === "tool-call") {
+                label = "Tool call: " + (part.name || "unknown");
+                content = '<pre class="modal-part-tool">' + escapeHtml(formatToolInput(part)) + '</pre>';
+            } else if (part.type === "tool-result") {
+                label = "Tool result: " + (part.name || "unknown");
+                content = '<pre class="modal-part-tool">' + escapeHtml(part.output || "") + '</pre>';
+            } else {
+                label = part.type;
+                content = '<pre class="modal-part-unknown">' + escapeHtml(part.raw || "") + '</pre>';
+            }
+            var copyId = "modal-copy-" + i;
+            html += '<div class="modal-part">' +
+                        '<div class="modal-part-header">' +
+                            '<span class="modal-part-label">' + escapeHtml(label) + '</span>' +
+                            '<button class="btn btn-secondary modal-copy-btn" data-target="' + copyId + '" type="button">Copy</button>' +
+                        '</div>' +
+                        '<div id="' + copyId + '" class="modal-part-content">' + content + '</div>' +
+                    '</div>';
+        });
+        container.innerHTML = html;
+
+        // Wire copy buttons.
+        container.querySelectorAll(".modal-copy-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+                var target = document.getElementById(btn.getAttribute("data-target"));
+                if (!target) return;
+                var text = target.textContent || "";
+                navigator.clipboard.writeText(text).then(function () {
+                    btn.textContent = "Copied!";
+                    setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                }).catch(function () {});
+            });
         });
     }
 
-    function toggleFields() {
-        var t = typeSelect.value;
-        show("field-ids", t === "sessions");
-        show("field-names", t === "models");
-        show("field-values", t === "days");
+    function formatToolInput(part) {
+        var name = part.name || "";
+        var input = part.input || "";
+        if (typeof input === "object") {
+            try { input = JSON.stringify(input, null, 2); } catch (e) {}
+        }
+        return name ? (name + "\n" + input) : input;
     }
 
-    function show(id, on) {
-        var el = document.getElementById(id);
-        if (el) el.style.display = on ? "flex" : "none";
+    function escapeHtml(str) {
+        var div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
     }
 
-    function val(id) {
-        var el = document.getElementById(id);
-        return el ? el.value : "";
-    }
+    // Delegate click on .msg-content-btn.
+    wrap.addEventListener("click", function (e) {
+        var btn = e.target.closest(".msg-content-btn");
+        if (!btn) return;
+        e.stopPropagation();
+        var messageId = btn.getAttribute("data-message-id");
+        if (messageId) openModal(messageId);
+    });
+
+    // Escape key closes modal.
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && modal && !modal.hidden) {
+            closeModal();
+        }
+    });
 })();

@@ -52,7 +52,7 @@ def test_formatting_helpers():
     assert fmt_tokens(2500000) == "2.5M"
 
     # aggregate
-    assert aggregate([]) == {"count": 0, "mean": None, "median": None, "min": None, "max": None}
+    assert aggregate([]) == {"count": 0, "mean": None, "median": None, "p95": None, "min": None, "max": None, "low_n": False}
     result = aggregate([10, 20, 30])
     assert result["count"] == 3
     assert result["mean"] == 20.0
@@ -136,14 +136,17 @@ def test_html_generation_aggregate():
             "cost": 0.5,
         },
         "tps": {
-            "aggregate": {"count": 40, "mean": 45.0, "median": 42.0, "min": 10.0, "max": 80.0},
+            "aggregate": {"count": 40, "mean": 45.0, "median": 42.0, "p95": 75.0, "min": 10.0, "max": 80.0, "low_n": False},
             "note": "excludes low-confidence messages",
         },
         "ttft": {
-            "aggregate": {"count": 40, "mean": 600.0, "median": 550.0, "min": 200.0, "max": 1500.0},
+            "aggregate": {"count": 40, "mean": 600.0, "median": 550.0, "p95": 1300.0, "min": 200.0, "max": 1500.0, "low_n": False},
         },
         "per_model": [
-            {"model": "test-provider/test-model", "messages": 40, "output_tokens": 50000, "tps_mean": 45.0, "tps_median": 42.0, "cost": 0.5},
+            {"model": "test-provider/test-model", "messages": 40, "output_tokens": 50000,
+             "tps_mean": 45.0, "tps_median": 42.0, "tps_p50": 42.0, "tps_p95": 75.0, "tps_low_n": False,
+             "ttft_mean": 600.0, "ttft_median": 550.0, "ttft_p50": 550.0, "ttft_p95": 1300.0, "ttft_low_n": False,
+             "cost": 0.5},
         ],
         "top_sessions": [
             {"id": "ses1", "title": "Test", "model": "test-provider/test-model", "output_tokens": 10000, "cost": 0.1, "duration_seconds": 600.0},

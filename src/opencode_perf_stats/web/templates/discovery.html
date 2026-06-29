@@ -26,8 +26,15 @@
         <input type="number" id="days" name="days" min="0" value="{{ filters.days if filters.days is not none else '' }}" placeholder="all">
     </div>
     <div class="form-field">
-        <label for="model">Model (substring)</label>
-        <input type="text" id="model" name="model" value="{{ filters.model or '' }}" placeholder="e.g. mimo">
+        <label for="model">Model</label>
+        <input type="text" id="model" name="model" list="model-list"
+               value="{{ filters.model or '' }}" placeholder="e.g. xiaomi/mimo-v2.5-pro"
+               autocomplete="off">
+        <datalist id="model-list">
+            {% for m in models %}
+            <option value="{{ m.identity }}">{{ m.identity }} ({{ m.count }})</option>
+            {% endfor %}
+        </datalist>
     </div>
     <button type="submit" class="btn btn-primary">Filter</button>
     <a href="{{ url_for('discovery') }}" class="btn">Reset</a>
@@ -55,7 +62,7 @@
             <td class="mono"><a href="{{ url_for('session_report', session_id=s.id) }}">{{ s.id[:24] }}…</a></td>
             <td><a href="{{ url_for('session_report', session_id=s.id) }}">{{ s.title[:40] }}</a></td>
             <td>{{ s.agent }}</td>
-            <td class="mono">{{ s.model }}</td>
+            <td class="mono">{{ s.model_identity }}</td>
             <td class="mono">{{ "{:,}".format(s.tokens_output) }}</td>
             <td class="mono">${{ "%.2f"|format(s.cost) }}</td>
             <td class="mono">{{ s.updated[5:22] if s.updated != '—' else '—' }}</td>

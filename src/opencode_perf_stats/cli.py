@@ -49,7 +49,7 @@ def main() -> None:
             "  1. Single-session: pass a session_id, or pass nothing for the most recent.\n"
             "  2. Aggregate: pass --days and/or --model with NO session_id.\n"
             "  3. Discovery: --list prints recent sessions and exits.\n"
-            "  4. Compare: compare sessions, models, or date ranges.\n"
+            "  4. Compare: compare sessions or models.\n"
             "  5. Web UI: `serve` launches an interactive browser UI (requires the [web] extra).\n\n"
             "Precedence: explicit session_id > --list > aggregate (filters present).\n"
             "If no session_id and no filters: reports on the most recent session."
@@ -163,11 +163,11 @@ def _handle_compare_command() -> None:
     """Handle the compare subcommand separately."""
     parser = argparse.ArgumentParser(
         prog="opencode-perf-stats compare",
-        description="Compare sessions, models, or date ranges",
+        description="Compare sessions or models",
     )
     parser.add_argument(
         "type",
-        choices=["sessions", "models", "days"],
+        choices=["sessions", "models"],
         help="what to compare",
     )
     parser.add_argument(

@@ -1,4 +1,4 @@
-"""Comparison mode — compare sessions, models, or date ranges.
+"""Comparison mode — compare sessions or models side by side.
 
 Pure data builders that both the CLI (``run_compare``) and the Flask web UI
 (``compare`` route) consume. The CLI is a thin wrapper that dispatches these
@@ -9,7 +9,7 @@ Locked comparison dict schema
 Each builder returns::
 
     {
-      "type": "sessions" | "models" | "days",
+      "type": "sessions" | "models",
       "count": <int>,
       "items": [
         {
@@ -17,9 +17,10 @@ Each builder returns::
           # type-specific identity keys:
           #   sessions: "id", "model"
           #   models:    "model"
-          #   days:      "days"
-          # plus, for sessions/models: "session_count" (models/days only),
+          # plus, for models: "session_count",
           # and for sessions a top-level "title" is folded into "label".
+          # For models, "label"/"model" are resolved to the full
+          # "provider/model" identity from matched sessions when resolvable.
           "metrics": {
             "tps_mean":     <float|null>,
             "tps_median":   <float|null>,
@@ -39,13 +40,12 @@ Each builder returns::
       ]
     }
 
-``metrics`` uses the same set of keys across all three types where applicable;
+``metrics`` uses the same set of keys across both types where applicable;
 unknown/inapplicable keys are ``None`` or ``0``.
 
 Usage:
     opencode-perf-stats compare sessions ses_a ses_b [ses_c] [ses_d]
     opencode-perf-stats compare models mimo gpt-4 claude
-    opencode-perf-stats compare days 7 30
 """
 
 import json
@@ -158,8 +158,13 @@ def build_sessions_comparison(conn: sqlite3.Connection, session_ids: list[str]) 
 def build_models_comparison(conn: sqlite3.Connection, model_names: list[str]) -> dict:
     """Build a side-by-side models comparison dict.
 
-    Accepts ≥2 model name substrings. Returns the locked dict schema.
-    Items with no matching sessions get an empty-metrics entry with session_count=0.
+    Accepts ≥2 model names.  Each name may be either a full ``provider/model``
+    identity (e.g. ``xiaomi/mimo-v2.5-pro``) or a bare model-ID substring
+    (backward-compat).  Matched sessions carry ``model_identity``; the
+    resolved identity is used as the item ``label``/``model`` so comparison
+    columns show ``neuralwatt/glm-5.2`` rather than the raw search substring.
+    Items with no matching sessions keep the input as label with session_count=0.
+    Returns the locked dict schema.
     """
     if len(model_names) < 2:
         raise ValueError("need at least 2 models to compare")
@@ -184,57 +189,36 @@ def build_models_comparison(conn: sqlite3.Connection, model_names: list[str]) ->
             })
             continue
 
+        # Resolve the distinct provider/model identity/identities actually
+        # matched (sessions carry model_identity from fetch_matching_sessions).
+        identities = sorted({
+            s["model_identity"] for s in sessions if s.get("model_identity")
+        })
+        if not identities:
+            resolved_label = model_name
+            resolved_model = model_name
+        elif len(identities) == 1:
+            resolved_label = identities[0]
+            resolved_model = identities[0]
+        else:
+            # Substring matched multiple distinct identities; label with the
+            # joined list so the comparison column is unambiguous.
+            resolved_label = ", ".join(identities)
+            resolved_model = identities[0]
+
         session_ids = [s["id"] for s in sessions]
         messages = fetch_aggregate_messages(conn, session_ids)
         ttft_rows = fetch_aggregate_ttft(conn, session_ids, final_only=False)
         data = build_aggregate_data(sessions, messages, ttft_rows, final_only=False)
 
         items.append({
-            "label": model_name,
-            "model": model_name,
+            "label": resolved_label,
+            "model": resolved_model,
             "session_count": len(sessions),
             "metrics": _metrics_from_aggregate(data),
         })
 
     return {"type": "models", "count": len(items), "items": items}
-
-
-def build_days_comparison(conn: sqlite3.Connection, day_ints: list[int]) -> dict:
-    """Build a side-by-side date-range comparison dict.
-
-    Accepts ≥2 ``--days``-style integers (days back from now). Returns the locked schema.
-    """
-    if len(day_ints) < 2:
-        raise ValueError("need at least 2 date ranges to compare")
-
-    items = []
-    for days in day_ints:
-        where = " WHERE time_created > strftime('%s','now',?) * 1000 AND tokens_input > 0"
-        params = [f"-{int(days)} days"]
-
-        sessions = fetch_matching_sessions(conn, where, params)
-        if not sessions:
-            items.append({
-                "label": f"Last {days} days",
-                "days": days,
-                "session_count": 0,
-                "metrics": _empty_metrics(),
-            })
-            continue
-
-        session_ids = [s["id"] for s in sessions]
-        messages = fetch_aggregate_messages(conn, session_ids)
-        ttft_rows = fetch_aggregate_ttft(conn, session_ids, final_only=False)
-        data = build_aggregate_data(sessions, messages, ttft_rows, final_only=False)
-
-        items.append({
-            "label": f"Last {days} days",
-            "days": days,
-            "session_count": len(sessions),
-            "metrics": _metrics_from_aggregate(data),
-        })
-
-    return {"type": "days", "count": len(items), "items": items}
 
 
 def _empty_metrics() -> dict:
@@ -263,9 +247,6 @@ def run_compare(args) -> None:
             comparison = build_sessions_comparison(conn, values)
         elif compare_type == "models":
             comparison = build_models_comparison(conn, values)
-        elif compare_type == "days":
-            day_ints = _parse_days(values)
-            comparison = build_days_comparison(conn, day_ints)
         else:
             sys.stderr.write(f"error: unknown comparison type '{compare_type}'\n")
             sys.exit(1)
@@ -283,18 +264,6 @@ def run_compare(args) -> None:
         _write_html(html, args.compare_html, "opencode-perf-stats-compare.html")
     else:
         _print_comparison(comparison)
-
-
-def _parse_days(values: list[str]) -> list[int]:
-    """Parse --days-style integers from string values."""
-    day_ints = []
-    for d in values:
-        try:
-            day_ints.append(int(d))
-        except ValueError:
-            sys.stderr.write(f"error: '{d}' is not a valid number of days\n")
-            sys.exit(1)
-    return day_ints
 
 
 def _write_html(html: str, path: str, default_name: str) -> None:
@@ -319,8 +288,6 @@ def _print_comparison(comparison: dict) -> None:
         _print_session_comparison(items)
     elif ctype == "models":
         _print_model_comparison(items)
-    elif ctype == "days":
-        _print_day_comparison(items)
 
 
 def _fmt_metric(metrics: dict, key: str) -> str:
@@ -353,16 +320,9 @@ def _print_session_comparison(items: list[dict]) -> None:
 
 def _print_model_comparison(items: list[dict]) -> None:
     print("## Model Comparison\n")
-    labels = [i["label"] for i in items]
-    print(f"| Metric | {' | '.join(labels)} |")
-    print(f"|--------|{'|'.join('---' for _ in items)}|")
-    print(f"| Sessions | {' | '.join(str(i['session_count']) for i in items)} |")
-    _print_metric_rows(items)
-
-
-def _print_day_comparison(items: list[dict]) -> None:
-    print("## Date Range Comparison\n")
-    labels = [i["label"] for i in items]
+    # Cap column width (identities like provider/model can be long); mirror
+    # the sessions comparison's [:25] but allow more room for identities.
+    labels = [i["label"][:40] for i in items]
     print(f"| Metric | {' | '.join(labels)} |")
     print(f"|--------|{'|'.join('---' for _ in items)}|")
     print(f"| Sessions | {' | '.join(str(i['session_count']) for i in items)} |")

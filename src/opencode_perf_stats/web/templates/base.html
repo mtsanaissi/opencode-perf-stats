@@ -12,6 +12,7 @@
         <span class="nav-brand">opencode-perf-stats</span>
         <a href="{{ url_for('discovery') }}" class="{{ 'active' if nav == 'discover' else '' }}">Discover</a>
         <a href="{{ url_for('aggregate') }}" class="{{ 'active' if nav == 'aggregate' else '' }}">Aggregate</a>
+        <a href="{{ url_for('trends') }}" class="{{ 'active' if nav == 'trends' else '' }}">Trends</a>
         <a href="{{ url_for('compare_landing') }}" class="{{ 'active' if nav == 'compare' else '' }}">Compare</a>
         <span class="nav-spacer"></span>
         <span class="nav-meta">v{{ version }}</span>

@@ -333,15 +333,19 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
 
     # Per-model chart data
     model_labels = [r["model"].split("/")[-1][:20] for r in model_rows]
-    model_tps_mean = [r["tps_mean"] or 0 for r in model_rows]
-    model_tps_median = [r["tps_median"] or 0 for r in model_rows]
+    model_tps_p50 = [r.get("tps_p50") or 0 for r in model_rows]
+    model_tps_p95 = [r.get("tps_p95") or 0 for r in model_rows]
+    model_ttft_p50 = [r.get("ttft_p50") or 0 for r in model_rows]
+    model_ttft_p95 = [r.get("ttft_p95") or 0 for r in model_rows]
     model_output = [r["output_tokens"] for r in model_rows]
     model_costs = [r["cost"] for r in model_rows]
 
     model_chart_data = json.dumps({
         "labels": model_labels,
-        "tps_mean": model_tps_mean,
-        "tps_median": model_tps_median,
+        "tps_p50": model_tps_p50,
+        "tps_p95": model_tps_p95,
+        "ttft_p50": model_ttft_p50,
+        "ttft_p95": model_ttft_p95,
         "output": model_output,
         "costs": model_costs,
     })
@@ -354,11 +358,11 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
         "output": top_output,
     })
 
-    # Format values for display
-    tps_mean_str = f"{tps_agg['mean']:.1f}" if tps_agg['mean'] else "—"
-    tps_median_str = f"{tps_agg['median']:.1f}" if tps_agg['median'] else "—"
-    ttft_mean_str = f"{ttft_agg['mean']:.0f}ms" if ttft_agg['mean'] else "—"
-    ttft_median_str = f"{ttft_agg['median']:.0f}ms" if ttft_agg['median'] else "—"
+    # Format values for display (UI shows p50 headline + p95 detail).
+    tps_p50_str = f"{tps_agg['median']:.1f}" if tps_agg.get('median') is not None else "—"
+    tps_p95_str = f"{tps_agg['p95']:.1f}{' ⚠' if tps_agg.get('low_n') and tps_agg.get('p95') is not None else ''}" if tps_agg.get('p95') is not None else "—"
+    ttft_p50_str = f"{ttft_agg['median']:.0f}ms" if ttft_agg.get('median') is not None else "—"
+    ttft_p95_str = f"{ttft_agg['p95']:.0f}ms{' ⚠' if ttft_agg.get('low_n') and ttft_agg.get('p95') is not None else ''}" if ttft_agg.get('p95') is not None else "—"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -385,14 +389,14 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
             <div class="card-detail">Cache hit: {tk['cache_hit_pct']:.1f}%</div>
         </div>
         <div class="card">
-            <div class="card-title">TPS Mean</div>
-            <div class="card-value">{tps_mean_str}</div>
-            <div class="card-detail">Median: {tps_median_str}</div>
+            <div class="card-title">TPS p50</div>
+            <div class="card-value">{tps_p50_str}</div>
+            <div class="card-detail">p95: {tps_p95_str}</div>
         </div>
         <div class="card">
-            <div class="card-title">TTFT Mean</div>
-            <div class="card-value">{ttft_mean_str}</div>
-            <div class="card-detail">Median: {ttft_median_str}</div>
+            <div class="card-title">TTFT p50</div>
+            <div class="card-value">{ttft_p50_str}</div>
+            <div class="card-detail">p95: {ttft_p95_str}</div>
         </div>
     </div>
 
@@ -417,6 +421,11 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
     </div>
 
     <div class="chart-container">
+        <h2>Per-Model TTFT</h2>
+        <canvas id="modelTtftChart"></canvas>
+    </div>
+
+    <div class="chart-container">
         <h2>Per-Model Output Tokens</h2>
         <canvas id="modelOutputChart"></canvas>
     </div>
@@ -434,8 +443,10 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
                     <th>Model</th>
                     <th>Messages</th>
                     <th>Output Tokens</th>
-                    <th>TPS Mean</th>
-                    <th>TPS Median</th>
+                    <th>TPS p50</th>
+                    <th>TPS p95</th>
+                    <th>TTFT p50</th>
+                    <th>TTFT p95</th>
                     <th>Cost</th>
                 </tr>
             </thead>
@@ -482,14 +493,14 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
             labels: modelData.labels,
             datasets: [
                 {{
-                    label: 'TPS Mean',
-                    data: modelData.tps_mean,
+                    label: 'TPS p50',
+                    data: modelData.tps_p50,
                     backgroundColor: '#4dc9f6',
                     borderRadius: 4,
                 }},
                 {{
-                    label: 'TPS Median',
-                    data: modelData.tps_median,
+                    label: 'TPS p95',
+                    data: modelData.tps_p95,
                     backgroundColor: '#537bc4',
                     borderRadius: 4,
                 }}
@@ -500,6 +511,35 @@ def render_aggregate_html(data: dict, filter_desc: str) -> str:
             plugins: {{ legend: {{ position: 'top' }} }},
             scales: {{
                 y: {{ beginAtZero: true, title: {{ display: true, text: 'Tokens/sec' }} }}
+            }}
+        }}
+    }});
+
+    // Per-model TTFT
+    new Chart(document.getElementById('modelTtftChart'), {{
+        type: 'bar',
+        data: {{
+            labels: modelData.labels,
+            datasets: [
+                {{
+                    label: 'TTFT p50 (ms)',
+                    data: modelData.ttft_p50,
+                    backgroundColor: '#4dc9f6',
+                    borderRadius: 4,
+                }},
+                {{
+                    label: 'TTFT p95 (ms)',
+                    data: modelData.ttft_p95,
+                    backgroundColor: '#537bc4',
+                    borderRadius: 4,
+                }}
+            ]
+        }},
+        options: {{
+            responsive: true,
+            plugins: {{ legend: {{ position: 'top' }} }},
+            scales: {{
+                y: {{ beginAtZero: true, title: {{ display: true, text: 'ms' }} }}
             }}
         }}
     }});
@@ -556,12 +596,15 @@ def _render_model_rows(model_rows: list[dict]) -> str:
     """Render HTML table rows for per-model breakdown."""
     rows = []
     for r in model_rows:
-        tps_m = f"{r['tps_mean']:.1f}" if r["tps_mean"] is not None else "—"
-        tps_med = f"{r['tps_median']:.1f}" if r["tps_median"] is not None else "—"
+        tps_p50 = f"{r['tps_p50']:.1f}" if r.get("tps_p50") is not None else "—"
+        tps_p95 = f"{r['tps_p95']:.1f}" + (" ⚠" if r.get("tps_low_n") else "") if r.get("tps_p95") is not None else "—"
+        ttft_p50 = f"{r['ttft_p50']:.0f}ms" if r.get("ttft_p50") is not None else "—"
+        ttft_p95 = f"{r['ttft_p95']:.0f}ms" + (" ⚠" if r.get("ttft_low_n") else "") if r.get("ttft_p95") is not None else "—"
         rows.append(
             f"<tr><td class='mono'>{r['model']}</td><td>{r['messages']:,}</td>"
-            f"<td>{r['output_tokens']:,}</td><td class='mono'>{tps_m}</td>"
-            f"<td class='mono'>{tps_med}</td><td>${r['cost']:.4f}</td></tr>"
+            f"<td>{r['output_tokens']:,}</td><td class='mono'>{tps_p50}</td>"
+            f"<td class='mono'>{tps_p95}</td><td class='mono'>{ttft_p50}</td>"
+            f"<td class='mono'>{ttft_p95}</td><td>${r['cost']:.4f}</td></tr>"
         )
     return "\n                ".join(rows)
 
@@ -582,7 +625,7 @@ def _render_session_rows(top_sessions: list[dict]) -> str:
 # ── comparison HTML ──────────────────────────────────────────────────────────
 
 def render_compare_html(comparison: dict) -> str:
-    """Render a comparison (sessions/models/days) as a self-contained HTML page.
+    """Render a comparison (sessions/models) as a self-contained HTML page.
 
     Consumes the locked comparison dict schema from ``compare.py``:
     ``{"type", "count", "items": [{"label", "metrics": {...}}, ...]}``.
@@ -596,6 +639,11 @@ def render_compare_html(comparison: dict) -> str:
     ttft_means = [i["metrics"]["ttft_mean"] or 0 for i in items]
     tokens_totals = [i["metrics"]["tokens_total"] for i in items]
     costs = [i["metrics"]["cost"] for i in items]
+    costs_per_million = [
+        i["metrics"]["cost"] / i["metrics"]["tokens_total"] * 1_000_000
+        if i["metrics"]["tokens_total"] else 0
+        for i in items
+    ]
 
     colors = [COLORS[i % len(COLORS)] for i in range(len(items))]
 
@@ -606,19 +654,17 @@ def render_compare_html(comparison: dict) -> str:
         "ttft_means": ttft_means,
         "tokens_totals": tokens_totals,
         "costs": costs,
+        "costs_per_million": costs_per_million,
     })
 
-    title = {"sessions": "Session Comparison", "models": "Model Comparison",
-             "days": "Date Range Comparison"}.get(ctype, "Comparison")
+    title = {"sessions": "Session Comparison",
+             "models": "Model Comparison"}.get(ctype, "Comparison")
 
     # Extra identity row per type.
     if ctype == "sessions":
         extra_header = "Model"
         extra_values = [i.get("model", "—") for i in items]
-    elif ctype == "models":
-        extra_header = "Sessions"
-        extra_values = [str(i.get("session_count", "—")) for i in items]
-    else:  # days
+    else:  # models
         extra_header = "Sessions"
         extra_values = [str(i.get("session_count", "—")) for i in items]
 
@@ -713,9 +759,12 @@ def render_compare_html(comparison: dict) -> str:
         type: 'bar',
         data: {{
             labels: cmpData.labels,
-            datasets: [{{ label: 'Cost ($)', data: cmpData.costs, backgroundColor: cmpData.colors, borderRadius: 4 }}]
+            datasets: [
+                {{ label: 'Total Cost', data: cmpData.costs, backgroundColor: '#4dc9f6', borderRadius: 4 }},
+                {{ label: 'Cost per 1M Tokens', data: cmpData.costs_per_million, backgroundColor: '#f67019', borderRadius: 4 }},
+            ]
         }},
-        options: {{ responsive: true, plugins: {{ legend: {{ display: false }} }}, scales: {{ y: {{ beginAtZero: true, title: {{ display: true, text: 'USD' }} }} }} }}
+        options: {{ responsive: true, plugins: {{ legend: {{ position: 'top' }} }}, scales: {{ y: {{ beginAtZero: true, title: {{ display: true, text: 'USD' }} }} }} }}
     }});
     </script>
 </body>

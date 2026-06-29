@@ -17,9 +17,10 @@ Provide a full-featured web UI for `opencode-perf-stats` covering every mode the
 | FR-1 | **Discovery view** (`/`): list recent sessions (id, title, agent, model, output tokens, cost, updated), filterable by `days` and `model` substring. |
 | FR-2 | **Single-session view** (`/session/<id>`): render TPS, TTFT, token/cost breakdown, message summary, per-message detail table; toggle for `final_only` (finish='stop'). |
 | FR-3 | **Aggregate view** (`/aggregate`): aggregate TPS/TTFT/tokens across sessions matching `days`/`model`/`final_only` filters; per-model breakdown table + top sessions. |
-| FR-4 | **Comparison view** (`/compare`): compare 2–4 sessions side by side; compare models; compare date ranges (`days`). Render shared comparison table + grouped charts. |
+| FR-4 | **Comparison view** (`/compare`): compare 2–4 sessions side by side; compare models. Render shared comparison table + grouped charts. (Date-range comparison was removed in favour of the time-series Trends view.) |
+| FR-4b | **Trends view** (`/trends`): time-series analysis bucketing metrics by day/week/month/year (shared period selector), with stacked per-model charts for TPS, TTFT, tokens, cost, sessions, and messages. Each chart is independently toggleable. Defaults to the last 30 days. |
 | FR-5 | **Selection basket**: on discovery, checkbox-select sessions and trigger comparison for the selected set (2–4). |
-| FR-6 | **CTA buttons**: each mode reachable via explicit call-to-action buttons/tabs (Discover / Aggregate / Compare). |
+| FR-6 | **CTA buttons**: each mode reachable via explicit call-to-action buttons/tabs (Discover / Aggregate / Trends / Compare). |
 | FR-7 | **Charts**: Chart.js bar/doughnut charts reused from existing `reports/html.py` (TPS per message, TTFT per message, token doughnut, message doughnut, per-model grouped bars, top sessions). |
 | FR-8 | **DB override**: `--db PATH` honored throughout the UI (no multi-tenant state). |
 | FR-9 | **`serve` subcommand**: `opencode-perf-stats serve [--port] [--host] [--db] [--no-browser]` launches a localhost dev server and opens the browser. |
@@ -105,9 +106,9 @@ All GET, form-driven where filters apply:
 | `GET /` | Discovery (filter form + session table) | `build_session_filter` + `fetch_discovery_sessions` |
 | `GET /session/<id>?final_only=1` | Single-session report | `fetch_session` + `fetch_assistant_messages` + `fetch_ttft` + `build_report_data` |
 | `GET /aggregate?days=N&model=...&final_only=1` | Aggregate report | `build_session_filter` + `fetch_matching_sessions` + `fetch_aggregate_messages` + `fetch_aggregate_ttft` + `build_aggregate_data` |
+| `GET /trends?days=N&model=...&period=day&final_only=1` | Time-series trends (day/week/month/year) | `build_session_filter` + `build_time_series` (reuses `fetch_matching_sessions` + `fetch_aggregate_messages` + `fetch_aggregate_ttft` + `formatting.aggregate`) |
 | `GET /compare/sessions?ids=ses_a,ses_b,...` | Session comparison (2–4) | `build_sessions_comparison` |
 | `GET /compare/models?names=mimo,gpt-4,...` | Model comparison (≥2) | `build_models_comparison` |
-| `GET /compare/days?values=7,30,...` | Date-range comparison (≥2) | `build_days_comparison` |
 
 Selection basket on discovery persists selected IDs in the URL query string so "Compare selected (N)" links straight to `/compare/sessions?ids=...`.
 

@@ -81,7 +81,7 @@ opencode-perf-stats --list --days 7 --json  # filtered, JSON
 
 ### Comparison (experimental)
 
-Compare sessions, models, or date ranges side by side.
+Compare sessions or models side by side.
 
 ```bash
 # Compare up to 4 sessions
@@ -89,9 +89,6 @@ opencode-perf-stats compare sessions ses_a ses_b ses_c ses_d
 
 # Compare models
 opencode-perf-stats compare models mimo gpt-4 claude
-
-# Compare date ranges
-opencode-perf-stats compare days 7 30
 
 # JSON output
 opencode-perf-stats compare sessions ses_a ses_b --json
@@ -122,9 +119,9 @@ Charts include:
 
 ## Web UI
 
-An interactive browser UI covers all four modes with modern, intuitive UX:
-session discovery, single-session reports, aggregate views, and side-by-side
-comparison. Requires the optional `web` extra:
+An interactive browser UI covers every mode with modern, intuitive UX:
+session discovery, single-session reports, aggregate views, per-period time
+analysis, and side-by-side comparison. Requires the optional `web` extra:
 
 ```bash
 pip install -e ".[web]"      # or: pip install "opencode-perf-stats[web]"
@@ -138,8 +135,12 @@ reports. Features:
   checkbox-select 2–4 sessions and use the sticky "Compare selected" basket.
 - **Aggregate (`/aggregate`)** — TPS/TTFT/tokens/cost across filtered sessions
   with per-model charts and top-sessions tables.
-- **Compare (`/compare`)** — compare sessions, models, or date ranges
-  side-by-side with grouped bar charts and a comparison table.
+- **Trends (`/trends`)** — time-series analysis: bucket metrics by day, week,
+  month, or year (shared period selector), with stacked per-model charts for
+  TPS, TTFT, tokens, cost, sessions, and messages. Each chart is independently
+  toggleable. Defaults to the last 30 days.
+- **Compare (`/compare`)** — compare sessions or models side-by-side with
+  grouped bar charts and a comparison table.
 - **Single session (`/session/<id>`)** — full report with TPS/TTFT/token
   charts and a per-message detail table; `final_only` toggle.
 
@@ -171,7 +172,7 @@ Options:
   --list                  List recent sessions and exit
 
 Subcommands:
-  compare                 Compare sessions, models, or date ranges
+  compare                 Compare sessions or models
   serve                   Launch the web UI (requires the [web] extra)
 ```
 

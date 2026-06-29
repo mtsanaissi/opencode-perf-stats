@@ -4,33 +4,92 @@
 
 <h1>Comparison</h1>
 
-<form class="form-row" id="compare-form">
-    <div class="form-field">
-        <label>Type</label>
-        <select id="cmp-type">
-            <option value="sessions" {{ 'selected' if ctype == 'sessions' else '' }}>Sessions</option>
-            <option value="models" {{ 'selected' if ctype == 'models' else '' }}>Models</option>
-            <option value="days" {{ 'selected' if ctype == 'days' else '' }}>Date ranges</option>
-        </select>
+<!-- Type selector tabs -->
+<div class="compare-tabs">
+    <button class="tab-btn {{ 'active' if picker_ctype == 'sessions' else '' }}" data-type="sessions" type="button">Sessions</button>
+    <button class="tab-btn {{ 'active' if picker_ctype == 'models' else '' }}" data-type="models" type="button">Models</button>
+</div>
+
+<!-- Sessions comparison panel -->
+<div class="compare-panel" id="panel-sessions" style="{{ '' if picker_ctype == 'sessions' else 'display:none;' }}">
+    <div class="panel-header">
+        <h3>Select 2–4 sessions to compare</h3>
+        <form class="form-row panel-filters" method="get" action="{{ url_for('compare_landing') }}">
+            <div class="form-field">
+                <label for="ps-days">Days back</label>
+                <input type="number" id="ps-days" name="days" min="0" value="{{ picker_session_filters.days if picker_session_filters.days is not none else '' }}" placeholder="all">
+            </div>
+            <div class="form-field">
+                <label for="ps-model">Model (substring)</label>
+                <input type="text" id="ps-model" name="model" list="ps-model-list"
+                       value="{{ picker_session_filters.model or '' }}" placeholder="e.g. xiaomi/mimo-v2.5-pro"
+                       autocomplete="off">
+                <datalist id="ps-model-list">
+                    {% for m in picker_filter_models %}
+                    <option value="{{ m.identity }}">{{ m.identity }} ({{ m.count }})</option>
+                    {% endfor %}
+                </datalist>
+            </div>
+            <button type="submit" class="btn btn-primary">Filter</button>
+            <a href="{{ url_for('compare_landing') }}" class="btn">Reset</a>
+        </form>
     </div>
-    <div class="form-field" id="field-ids">
-        <label for="cmp-ids">Session IDs (comma-separated)</label>
-        <input type="text" id="cmp-ids" value="{{ filters.ids or '' }}" placeholder="ses_a,ses_b" style="min-width:340px;">
+    {% if picker_sessions %}
+    <div class="session-selector" id="session-list">
+        {% for s in picker_sessions %}
+        <label class="session-item{{ ' selected' if s.id in active_ids else '' }}">
+            <input type="checkbox" class="cmp-check" data-basket="sessions" value="{{ s.id }}" {{ 'checked' if s.id in active_ids else '' }}>
+            <div class="session-info">
+                <div class="session-title"><a href="{{ url_for('session_report', session_id=s.id) }}">{{ s.title[:50] }}</a></div>
+                <div class="session-meta">
+                    <span class="mono">{{ s.model_identity }}</span>
+                    <span>{{ "{:,}".format(s.tokens_output) }} tokens</span>
+                    <span>${{ "%.2f"|format(s.cost) }}</span>
+                    <span>{{ s.updated[5:22] if s.updated != '—' else '—' }}</span>
+                </div>
+            </div>
+        </label>
+        {% endfor %}
     </div>
-    <div class="form-field" id="field-names" style="display:none;">
-        <label for="cmp-names">Model names (comma-separated)</label>
-        <input type="text" id="cmp-names" value="{{ filters.names or '' }}" placeholder="mimo,claude" style="min-width:340px;">
+    {% else %}
+    <div class="empty" id="session-list">No sessions match the given filters.</div>
+    {% endif %}
+    <div class="selection-bar" id="session-bar" style="display:none;">
+        <span><strong id="session-count">0</strong> of 4 selected</span>
+        <a class="btn btn-primary" id="compare-sessions-btn" href="#" data-base="{{ url_for('compare_sessions') }}">Compare Sessions</a>
     </div>
-    <div class="form-field" id="field-values" style="display:none;">
-        <label for="cmp-values">Days back (comma-separated)</label>
-        <input type="text" id="cmp-values" value="{{ filters.values or '' }}" placeholder="7,30" style="min-width:340px;">
+</div>
+
+<!-- Models comparison panel -->
+<div class="compare-panel" id="panel-models" style="{{ '' if picker_ctype == 'models' else 'display:none;' }}">
+    <div class="panel-header">
+        <h3>Select 2+ models to compare</h3>
     </div>
-    <button type="submit" class="btn btn-primary">Compare</button>
-</form>
+    {% if picker_models %}
+    <div class="model-selector" id="model-list">
+        {% for m in picker_models %}
+        <label class="model-item{{ ' selected' if m.identity in active_names else '' }}">
+            <input type="checkbox" class="cmp-check" data-basket="models" value="{{ m.identity }}" {{ 'checked' if m.identity in active_names else '' }}>
+            <div class="model-info">
+                <span class="mono">{{ m.identity }}</span>
+                <span class="model-count">{{ m.count }} session{{ '' if m.count == 1 else 's' }}</span>
+            </div>
+        </label>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty" id="model-list">No models found.</div>
+    {% endif %}
+    <div class="selection-bar" id="model-bar" style="display:none;">
+        <span><strong id="model-count">0</strong> selected</span>
+        <a class="btn btn-primary" id="compare-models-btn" href="#" data-base="{{ url_for('compare_models') }}">Compare Models</a>
+    </div>
+</div>
 
 {% if data %}
 
 {% set items = data['items'] %}
+<div class="compare-results">
 <p class="subtitle">{{ data.count }} item(s) compared</p>
 
 <div class="chart-container">
@@ -75,15 +134,14 @@
         {% endfor %}
         {% if data.type == 'sessions' %}
             <tr><td>Model</td>{% for it in items %}<td class="mono">{{ it.model }}</td>{% endfor %}</tr>
-        {% elif data.type in ('models','days') %}
+        {% elif data.type == 'models' %}
             <tr><td>Sessions</td>{% for it in items %}<td class="mono">{{ it.session_count }}</td>{% endfor %}</tr>
         {% endif %}
         </tbody>
     </table>
 </div>
+</div>
 
-{% else %}
-<div class="empty">Select a type and enter 2–4 items to compare.</div>
 {% endif %}
 
 {% endblock %}
@@ -101,7 +159,17 @@ const CMP = {{ data | tojson }};
     bar('tpsChart','TPS',CMP.items.map(i=>i.metrics.tps_mean||0),'Tokens/sec');
     bar('ttftChart','TTFT',CMP.items.map(i=>i.metrics.ttft_mean||0),'Milliseconds');
     bar('tokensChart','Tokens',CMP.items.map(i=>i.metrics.tokens_total),'Tokens');
-    bar('costChart','Cost',CMP.items.map(i=>i.metrics.cost),'USD');
+    new Chart(document.getElementById('costChart'),{
+        type:'bar',
+        data:{
+            labels,
+            datasets:[
+                {label:'Total Cost',data:CMP.items.map(i=>i.metrics.cost||0),backgroundColor:'#4dc9f6',borderRadius:4},
+                {label:'Cost per 1M Tokens',data:CMP.items.map(i=>{const c=i.metrics.cost||0,t=i.metrics.tokens_total||0;return t?c/t*1e6:0;}),backgroundColor:'#f67019',borderRadius:4},
+            ]
+        },
+        options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{beginAtZero:true,title:{display:true,text:'USD'}}}}
+    });
 })();
 </script>
 {% endif %}
