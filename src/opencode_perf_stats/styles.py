@@ -155,6 +155,8 @@ tr:hover { background: var(--accent-dim); }
 .badge-green { background: rgba(172, 194, 54, 0.2); color: var(--green); }
 .badge-orange { background: rgba(246, 112, 25, 0.2); color: var(--orange); }
 .badge-red { background: rgba(230, 25, 75, 0.2); color: var(--red); }
+.badge-blue { background: rgba(77, 201, 246, 0.2); color: var(--accent); }
+.msg-row-user { background: rgba(77, 201, 246, 0.05); }
 
 footer {
     margin-top: 3rem;

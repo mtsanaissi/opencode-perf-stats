@@ -27,8 +27,8 @@ opencode-perf-stats = "opencode_perf_stats.cli:main"
 web = ["flask>=3.0"]
 
 [project.urls]
-Homepage = "https://github.com/USERNAME/opencode-perf-stats"
-Issues = "https://github.com/USERNAME/opencode-perf-stats/issues"
+Homepage = "https://github.com/mtsanaissi/opencode-perf-stats"
+Issues = "https://github.com/mtsanaissi/opencode-perf-stats/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

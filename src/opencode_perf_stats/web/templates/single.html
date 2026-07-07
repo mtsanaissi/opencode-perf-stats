@@ -104,7 +104,38 @@
             <tr><th>#</th><th>TPS</th><th>Output Tokens</th><th>Duration</th><th>TTFT</th><th>Finish</th><th>Note</th></tr>
         </thead>
         <tbody id="msg-tbody">
-        {% for d in tps.detail %}
+        {% for d in data.all_messages %}
+            {% if d.role == 'user' %}
+            <tr class="msg-data-row row-clickable msg-row-user" data-message-id="{{ d.message_id }}"
+                id="msg-row-{{ loop.index }}" role="button" aria-expanded="false"
+                aria-controls="msg-detail-{{ loop.index }}" tabindex="0">
+                <td>{{ loop.index }}</td>
+                <td class="mono">—</td>
+                <td>—</td>
+                <td class="mono">—</td>
+                <td class="mono">—</td>
+                <td><span class="badge badge-blue">User</span></td>
+                <td>—</td>
+            </tr>
+            <tr class="msg-detail-row" id="msg-detail-{{ loop.index }}" hidden>
+                <td colspan="7">
+                    <div class="msg-detail-grid">
+                        <div class="msg-detail-field">
+                            <span class="msg-detail-label">Role</span>
+                            <span class="msg-detail-value">User (prompt)</span>
+                        </div>
+                        <div class="msg-detail-field">
+                            <span class="msg-detail-label">Created</span>
+                            <span class="msg-detail-value mono">{{ fmt_ts(d.created_ms) if d.created_ms else '—' }}</span>
+                        </div>
+                        <div class="msg-detail-field msg-detail-field--wide">
+                            <button class="btn btn-secondary msg-content-btn" type="button"
+                                    data-message-id="{{ d.message_id }}">View message content</button>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% else %}
             <tr class="msg-data-row row-clickable" data-message-id="{{ d.message_id }}"
                 id="msg-row-{{ loop.index }}" role="button" aria-expanded="false"
                 aria-controls="msg-detail-{{ loop.index }}" tabindex="0">
@@ -162,6 +193,7 @@
                     </div>
                 </td>
             </tr>
+            {% endif %}
         {% endfor %}
         </tbody>
     </table>

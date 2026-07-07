@@ -14,8 +14,16 @@ def build_report_data(
     messages: list[dict],
     ttft_map: dict[str, dict],
     final_only: bool,
+    user_messages: list[dict] | None = None,
 ) -> dict:
-    """Assemble the full single-session report dict (JSON or Markdown)."""
+    """Assemble the full single-session report dict (JSON or Markdown).
+
+    ``user_messages`` (optional) is a list of ``{"id", "created"}`` dicts
+    from ``fetch_user_messages``.  When provided, a merged ``all_messages``
+    list is built — user and assistant entries interleaved chronologically —
+    for the Per-Message Details table.  The ``tps.detail`` and ``ttft.detail``
+    lists remain assistant-only (charts depend on them).
+    """
 
     total_assistant = len(messages)
     timed = [m for m in messages if m["has_timing"]]
@@ -67,6 +75,35 @@ def build_report_data(
                 "finish": m["finish"],
             })
 
+    # Build a merged list of user + assistant messages for the Per-Message
+    # Details table.  User messages always appear (not affected by final_only);
+    # assistant entries inherit the final_only filter from tps_detail.
+    all_messages = []
+    for um in (user_messages or []):
+        all_messages.append({
+            "role": "user",
+            "message_id": um["id"],
+            "tps": None,
+            "output_tokens": 0,
+            "duration_ms": None,
+            "finish": None,
+            "low_confidence": False,
+            "low_confidence_reason": None,
+            "input_tokens": 0,
+            "reasoning_tokens": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "cost": 0.0,
+            "created_ms": um["created"],
+            "completed_ms": None,
+            "model_id": None,
+            "provider_id": None,
+        })
+    for d in tps_detail:
+        all_messages.append({"role": "assistant", **d})
+    # Sort by (created_ms, role_priority) — user before assistant on ties.
+    all_messages.sort(key=lambda x: (x["created_ms"] or 0, 0 if x["role"] == "user" else 1))
+
     duration_s = None
     if session["time_created"] and session["time_updated"]:
         duration_s = (session["time_updated"] - session["time_created"]) / 1000
@@ -110,6 +147,7 @@ def build_report_data(
             "detail": ttft_detail,
             "aggregate": aggregate(ttft_values),
         },
+        "all_messages": all_messages,
     }
 
 
@@ -170,15 +208,19 @@ def render_markdown(data: dict) -> str:
         lines.append(f"- **Max**: {agg['max']:.1f}")
         lines.append("")
         lines.append("### Per-message")
-        lines.append("| # | TPS | Output tokens | Duration | Finish | Note |")
-        lines.append("|---|-----|-------------|----------|--------|------|")
-        for i, d in enumerate(tps["detail"], 1):
+        lines.append("| # | Role | TPS | Output tokens | Duration | Finish | Note |")
+        lines.append("|---|------|-----|---------------|----------|--------|------|")
+        for i, d in enumerate(data.get("all_messages", tps["detail"]), 1):
+            role = d.get("role", "assistant")
+            if role == "user":
+                lines.append(f"| {i} | user | — | — | — | — | — |")
+                continue
             note = ""
             if d["low_confidence"]:
                 note = f"⚠ {d['low_confidence_reason']}" if d["low_confidence_reason"] else "⚠ low-confidence"
             dur = fmt_duration(d["duration_ms"] / 1000) if d["duration_ms"] else "—"
             lines.append(
-                f"| {i} | {d['tps']:.1f} | {d['output_tokens']:,} | {dur} | {d['finish']} | {note} |"
+                f"| {i} | assistant | {d['tps']:.1f} | {d['output_tokens']:,} | {dur} | {d['finish']} | {note} |"
             )
     lines.append("")
 

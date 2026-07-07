@@ -11,6 +11,7 @@ from .db import (
     get_session_id,
     fetch_session,
     fetch_assistant_messages,
+    fetch_user_messages,
     fetch_ttft,
     build_session_filter,
     fetch_matching_sessions,
@@ -271,9 +272,11 @@ def _run_single(conn, args) -> None:
     session_id = get_session_id(conn, args.session_id)
     session = fetch_session(conn, session_id)
     messages = fetch_assistant_messages(conn, session_id)
+    user_messages = fetch_user_messages(conn, session_id)
     ttft_map = fetch_ttft(conn, session_id)
 
-    data = build_report_data(session, messages, ttft_map, args.final_only)
+    data = build_report_data(session, messages, ttft_map, args.final_only,
+                             user_messages=user_messages)
 
     if args.html is not None:
         html = render_single_html(data)

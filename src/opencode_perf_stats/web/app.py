@@ -26,6 +26,7 @@ from ..db import (
     get_session_id,
     fetch_session,
     fetch_assistant_messages,
+    fetch_user_messages,
     fetch_ttft,
     build_session_filter,
     fetch_matching_sessions,
@@ -206,8 +207,10 @@ def session_report(session_id: str):
         abort(404, description=f"Session '{session_id}' not found")
 
     messages = fetch_assistant_messages(conn, session_id)
+    user_messages = fetch_user_messages(conn, session_id)
     ttft_map = fetch_ttft(conn, session_id)
-    data = build_report_data(session, messages, ttft_map, final_only=final_only)
+    data = build_report_data(session, messages, ttft_map, final_only=final_only,
+                             user_messages=user_messages)
 
     return render_template("single.html", data=data, final_only=final_only,
                            session_id=session_id, nav="discover")

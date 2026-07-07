@@ -118,6 +118,8 @@ th {
 }
 
 tr.msg-data-row:hover { background: var(--accent-dim); }
+tr.msg-row-user { background: rgba(77, 201, 246, 0.05); }
+tr.msg-row-user:hover { background: var(--accent-dim); }
 
 .mono {
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
@@ -135,6 +137,7 @@ tr.msg-data-row:hover { background: var(--accent-dim); }
 .badge-green { background: rgba(172, 194, 54, 0.2); color: var(--green); }
 .badge-orange { background: rgba(246, 112, 25, 0.2); color: var(--orange); }
 .badge-red { background: rgba(230, 25, 75, 0.2); color: var(--red); }
+.badge-blue { background: rgba(77, 201, 246, 0.2); color: var(--accent); }
 
 .warn { color: var(--orange); font-size: 0.75rem; cursor: help; }
 

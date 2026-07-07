@@ -165,7 +165,7 @@ def render_single_html(data: dict) -> str:
                 </tr>
             </thead>
             <tbody>
-                {_render_detail_rows(tps["detail"], ttft["detail"])}
+                {_render_detail_rows(data.get("all_messages", tps["detail"]), ttft["detail"])}
             </tbody>
         </table>
     </div>
@@ -291,10 +291,25 @@ def _fmt_tokens_card(n: int) -> str:
 
 
 def _render_detail_rows(tps_detail: list[dict], ttft_detail: list[dict]) -> str:
-    """Render HTML table rows for per-message details."""
+    """Render HTML table rows for per-message details.
+
+    ``tps_detail`` may be a merged ``all_messages`` list (user + assistant
+    entries with a ``role`` key) or the legacy assistant-only ``tps_detail``
+    list.  User rows render with "—" for metrics and a "User" badge.
+    """
     ttft_map = {d["message_id"]: d for d in ttft_detail}
     rows = []
     for i, d in enumerate(tps_detail, 1):
+        if d.get("role") == "user":
+            rows.append(
+                f"<tr class='msg-row-user'>"
+                f"<td>{i}</td><td class='mono'>—</td>"
+                f"<td>—</td><td class='mono'>—</td>"
+                f"<td class='mono'>—</td>"
+                f"<td><span class='badge badge-blue'>User</span></td>"
+                f"<td>—</td></tr>"
+            )
+            continue
         tps_val = f"{d['tps']:.1f}" if d["tps"] is not None else "—"
         dur = _fmt_dur_ms(d["duration_ms"]) if d["duration_ms"] else "—"
         ttft_entry = ttft_map.get(d["message_id"])

@@ -52,6 +52,21 @@ def _seed_db(path: str) -> None:
              10000 * i, 5000 * i, 1000 * i, 2000 * i, 500 * i,
              now - 3600000 * i, now - 1800000 * i, None, "{}"),
         )
+        # one user message (the initial prompt) before the assistant messages
+        user_mid = f"msg_{sid}_user"
+        user_msg_data = json.dumps({
+            "role": "user",
+            "time": {"created": now - 1000},
+        })
+        conn.execute(
+            "INSERT INTO message (id,session_id,time_created,data) VALUES (?,?,?,?)",
+            (user_mid, sid, now - 1000, user_msg_data),
+        )
+        conn.execute(
+            "INSERT INTO part (id,message_id,session_id,data) VALUES (?,?,?,?)",
+            (f"part_{sid}_user", user_mid, sid,
+             json.dumps({"type": "text", "text": f"Initial prompt for {sid}"})),
+        )
         # three assistant messages per session (to exercise pagination)
         for j in range(1, 4):
             mid = f"msg_{sid}_{j}"
@@ -641,3 +656,62 @@ def test_message_parts_in_app_endpoints(app):
     """message_parts endpoint is registered in the Flask app."""
     endpoints = {r.endpoint for r in app.url_map.iter_rules()}
     assert "message_parts" in endpoints
+
+
+# ── user messages in Per-Message Details table ──────────────────────────────
+
+
+def test_session_report_shows_user_messages(client):
+    """Session report page includes user message rows with 'User' badge."""
+    r = client.get("/session/ses_a")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # User row class present
+    assert "msg-row-user" in body
+    # "User" badge present
+    assert "badge-blue" in body
+    assert ">User<" in body
+    # The user message id appears in the table (as data-message-id)
+    assert "msg_ses_a_user" in body
+
+
+def test_session_report_all_messages_in_json(client):
+    """The embedded REPORT JSON includes the all_messages list with user entries."""
+    r = client.get("/session/ses_a")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert '"all_messages"' in body
+    assert '"role": "user"' in body
+    assert '"role": "assistant"' in body
+
+
+def test_message_parts_for_user_message(client):
+    """GET /session/ses_a/message/msg_ses_a_user/parts returns user prompt text."""
+    r = client.get("/session/ses_a/message/msg_ses_a_user/parts")
+    assert r.status_code == 200
+    parts = r.get_json()["parts"]
+    text_parts = [p for p in parts if p["type"] == "text"]
+    assert len(text_parts) >= 1
+    assert "Initial prompt for ses_a" in text_parts[0]["text"]
+
+
+def test_session_report_user_message_first_row(client):
+    """The user message appears before assistant messages (chronological sort)."""
+    r = client.get("/session/ses_a")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # The user row (msg-row-user) should appear before the first assistant row.
+    user_pos = body.find("msg-row-user")
+    assistant_msg_id_pos = body.find("msg_ses_a_1")
+    assert user_pos != -1, "user row not found"
+    assert assistant_msg_id_pos != -1, "first assistant message id not found"
+    assert user_pos < assistant_msg_id_pos, "user row should precede first assistant row"
+
+
+def test_session_final_only_still_shows_user_messages(client):
+    """GET /session/<id>?final_only=1 still shows user messages (prompts)."""
+    r = client.get("/session/ses_a?final_only=1")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "msg-row-user" in body
+    assert "msg_ses_a_user" in body
