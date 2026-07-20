@@ -105,3 +105,6 @@ cline_docs/
 .tabnine
 .tabnine_root
 .junie/
+
+# MCP / Playwright
+.playwright-mcp/

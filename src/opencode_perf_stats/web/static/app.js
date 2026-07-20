@@ -341,6 +341,17 @@
         modal.hidden = false;
         document.body.style.overflow = "hidden";
 
+        // Look up message metadata from the embedded REPORT data.
+        var meta = null;
+        if (typeof REPORT !== "undefined" && REPORT.all_messages) {
+            for (var i = 0; i < REPORT.all_messages.length; i++) {
+                if (REPORT.all_messages[i].message_id === messageId) {
+                    meta = REPORT.all_messages[i];
+                    break;
+                }
+            }
+        }
+
         var url = "/session/" + encodeURIComponent(sessionId) +
                   "/message/" + encodeURIComponent(messageId) + "/parts";
         fetch(url)
@@ -349,7 +360,7 @@
                 return resp.json();
             })
             .then(function (data) {
-                renderParts(body, data.parts || []);
+                renderParts(body, data.parts || [], meta);
             })
             .catch(function (err) {
                 body.innerHTML =
@@ -366,12 +377,38 @@
         document.body.style.overflow = "";
     }
 
-    function renderParts(container, parts) {
+    function renderParts(container, parts, meta) {
+        var html = "";
+
+        // Render message context metadata if available (user messages).
+        if (meta && meta.role === "user") {
+            html += '<div class="modal-metadata">';
+            html += '<div class="modal-metadata-title">Message Context</div>';
+            html += '<div class="modal-metadata-grid">';
+            html += '<div class="modal-metadata-item"><span class="modal-metadata-label">Role</span>';
+            html += '<span class="modal-metadata-value"><span class="badge badge-blue">User</span></span></div>';
+            if (meta.agent) {
+                html += '<div class="modal-metadata-item"><span class="modal-metadata-label">Agent</span>';
+                html += '<span class="modal-metadata-value">' + escapeHtml(meta.agent) + '</span></div>';
+            }
+            if (meta.model_id) {
+                var modelStr = (meta.provider_id || "") + "/" + meta.model_id;
+                if (meta.variant) modelStr += " (" + meta.variant + ")";
+                html += '<div class="modal-metadata-item"><span class="modal-metadata-label">Model</span>';
+                html += '<span class="modal-metadata-value mono">' + escapeHtml(modelStr) + '</span></div>';
+            }
+            if (meta.created_ms) {
+                html += '<div class="modal-metadata-item"><span class="modal-metadata-label">Created</span>';
+                html += '<span class="modal-metadata-value mono">' + escapeHtml(formatTs(meta.created_ms)) + '</span></div>';
+            }
+            html += '</div></div>';
+        }
+
         if (!parts.length) {
-            container.innerHTML = '<p class="modal-empty">No content parts found.</p>';
+            if (!html) container.innerHTML = '<p class="modal-empty">No content parts found.</p>';
+            else container.innerHTML = html;
             return;
         }
-        var html = "";
         parts.forEach(function (part, i) {
             var label = "";
             var content = "";
@@ -424,6 +461,14 @@
             try { input = JSON.stringify(input, null, 2); } catch (e) {}
         }
         return name ? (name + "\n" + input) : input;
+    }
+
+    function formatTs(ms) {
+        if (!ms) return "\u2014";
+        var d = new Date(ms);
+        var pad = function(n) { return n < 10 ? "0" + n : "" + n; };
+        return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate()) +
+               " " + pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()) + ":" + pad(d.getUTCSeconds()) + " UTC";
     }
 
     function escapeHtml(str) {

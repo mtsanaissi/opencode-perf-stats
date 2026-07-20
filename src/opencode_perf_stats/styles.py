@@ -158,6 +158,45 @@ tr:hover { background: var(--accent-dim); }
 .badge-blue { background: rgba(77, 201, 246, 0.2); color: var(--accent); }
 .msg-row-user { background: rgba(77, 201, 246, 0.05); }
 
+/* Modal metadata section (user message context) */
+.modal-metadata {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.modal-metadata-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+}
+.modal-metadata-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 1.5rem;
+}
+.modal-metadata-item {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+}
+.modal-metadata-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.modal-metadata-value {
+    font-size: 0.85rem;
+    color: var(--text);
+}
+.modal-metadata-value.mono {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.8rem;
+}
+
 footer {
     margin-top: 3rem;
     padding-top: 1rem;

@@ -128,6 +128,14 @@
                             <span class="msg-detail-label">Created</span>
                             <span class="msg-detail-value mono">{{ fmt_ts(d.created_ms) if d.created_ms else '—' }}</span>
                         </div>
+                        <div class="msg-detail-field">
+                            <span class="msg-detail-label">Agent</span>
+                            <span class="msg-detail-value">{{ d.agent or '—' }}</span>
+                        </div>
+                        <div class="msg-detail-field">
+                            <span class="msg-detail-label">Model</span>
+                            <span class="msg-detail-value mono">{{ d.provider_id }}/{{ d.model_id }}{% if d.variant %} ({{ d.variant }}){% endif %}</span>
+                        </div>
                         <div class="msg-detail-field msg-detail-field--wide">
                             <button class="btn btn-secondary msg-content-btn" type="button"
                                     data-message-id="{{ d.message_id }}">View message content</button>

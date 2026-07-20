@@ -96,8 +96,11 @@ def build_report_data(
             "cost": 0.0,
             "created_ms": um["created"],
             "completed_ms": None,
-            "model_id": None,
-            "provider_id": None,
+            # Metadata from message.data (not available on assistant messages).
+            "agent": um.get("agent"),
+            "model_id": um.get("model_id"),
+            "provider_id": um.get("provider_id"),
+            "variant": um.get("variant"),
         })
     for d in tps_detail:
         all_messages.append({"role": "assistant", **d})

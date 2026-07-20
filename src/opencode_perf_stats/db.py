@@ -189,20 +189,35 @@ def fetch_assistant_messages(conn: sqlite3.Connection, session_id: str) -> list[
 def fetch_user_messages(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     """Fetch all user messages for a session (the prompts).
 
-    User messages carry no token/timing/finish data — only an id and
-    ``$.time.created``.  Content is stored in the ``part`` table and is
-    accessible via ``fetch_message_parts`` (same as assistant messages).
+    User messages carry no token/timing/finish data — only an id,
+    ``$.time.created``, and session context metadata (agent, model, variant).
+    Content is stored in the ``part`` table and is accessible via
+    ``fetch_message_parts`` (same as assistant messages).
     """
     rows = conn.execute(
         """SELECT id,
-                  json_extract(data, '$.time.created') as created
+                  json_extract(data, '$.time.created') as created,
+                  json_extract(data, '$.agent')        as agent,
+                  json_extract(data, '$.model')        as model_json,
+                  json_extract(data, '$.variant')      as variant
            FROM message
            WHERE session_id = ?
              AND json_extract(data, '$.role') = 'user'
            ORDER BY time_created""",
         (session_id,),
     ).fetchall()
-    return [{"id": r["id"], "created": r["created"]} for r in rows]
+    result = []
+    for r in rows:
+        model_raw = json.loads(r["model_json"]) if r["model_json"] else {}
+        result.append({
+            "id": r["id"],
+            "created": r["created"],
+            "agent": r["agent"],
+            "model_id": model_raw.get("id"),
+            "provider_id": model_raw.get("providerID"),
+            "variant": r["variant"],
+        })
+    return result
 
 
 def fetch_ttft(conn: sqlite3.Connection, session_id: str) -> dict[str, dict]:
