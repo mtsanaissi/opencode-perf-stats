@@ -3,6 +3,9 @@
 import subprocess
 import sys
 import importlib
+import os
+import sqlite3
+import tempfile
 
 
 def test_import():
@@ -186,10 +189,14 @@ def test_cli_version():
 
 def test_compare_sessions_validation():
     """Compare sessions requires at least 2 sessions."""
-    result = subprocess.run(
-        [sys.executable, "-m", "opencode_perf_stats", "compare", "sessions", "ses_only_one"],
-        capture_output=True,
-        text=True,
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "opencode"))
+        sqlite3.connect(os.path.join(tmp, "opencode", "opencode.db")).close()
+        result = subprocess.run(
+            [sys.executable, "-m", "opencode_perf_stats", "compare", "sessions", "ses_only_one"],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "XDG_DATA_HOME": tmp},
+        )
     assert result.returncode != 0
     assert "at least 2" in result.stderr
