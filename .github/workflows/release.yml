@@ -11,9 +11,9 @@ name: Release
 #     Environment:    pypi
 #
 # To cut a release:
-#   1. Bump version in pyproject.toml and src/opencode_perf_stats/__init__.py
-#   2. git tag -a v0.1.0 -m "Release v0.1.0"
-#   3. git push origin v0.1.0
+#   1. Bump the version: uv version --bump minor   (single source: pyproject.toml)
+#   2. git tag -a v0.2.0 -m "Release v0.2.0"
+#   3. git push origin v0.2.0
 
 on:
   push:
@@ -37,19 +37,16 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
 
-      - name: Install build tooling
-        run: |
-          python -m pip install --upgrade pip
-          pip install build twine
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
 
       - name: Build sdist and wheel
-        run: python -m build
+        run: uv build
 
       - name: Verify build metadata
         run: |
-          python -m twine check dist/*
+          uvx twine check dist/*
           echo "--- wheel contents (web assets) ---"
           python - <<'PY'
           import zipfile, glob, sys

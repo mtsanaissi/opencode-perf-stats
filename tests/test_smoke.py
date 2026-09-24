@@ -9,7 +9,7 @@ def test_import():
     """Package imports without error."""
     import opencode_perf_stats
     assert hasattr(opencode_perf_stats, "__version__")
-    assert opencode_perf_stats.__version__ == "0.1.0"
+    assert opencode_perf_stats.__version__ == "0.2.0"
 
 
 def test_submodules_import():
@@ -181,7 +181,7 @@ def test_cli_version():
         text=True,
     )
     assert result.returncode == 0
-    assert "0.1.0" in result.stdout
+    assert "0.2.0" in result.stdout
 
 
 def test_compare_sessions_validation():

@@ -4,19 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opencode-perf-stats"
-version = "0.1.0"
+version = "0.2.0"
 description = "Performance analytics for OpenCode sessions — TPS, TTFT, tokens, cost, and comparisons"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 keywords = ["opencode", "llm", "performance", "metrics", "analytics"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Quality Assurance",
 ]
 
@@ -25,6 +22,9 @@ opencode-perf-stats = "opencode_perf_stats.cli:main"
 
 [project.optional-dependencies]
 web = ["flask>=3.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
 [project.urls]
 Homepage = "https://github.com/mtsanaissi/opencode-perf-stats"
@@ -36,3 +36,7 @@ where = ["src"]
 # Include the web UI assets (templates + static) in the distribution.
 [tool.setuptools.package-data]
 "opencode_perf_stats.web" = ["templates/*.html", "static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -41,6 +41,8 @@ Performance analytics for [OpenCode](https://opencode.ai) sessions — TPS, TTFT
 
 ## Install
 
+> **Requires Python 3.12+.** Developed and tested on Python 3.12.
+
 ```bash
 # Recommended (includes the web UI)
 pip install "opencode-perf-stats[web]"
@@ -52,7 +54,13 @@ Or with [pipx](https://pypa.github.io/pipx/) (recommended for CLI tools):
 pipx install "opencode-perf-stats[web]"
 ```
 
-Or with [uv](https://docs.astral.sh/uv/):
+Or with [uv](https://docs.astral.sh/uv/) — as a persistent tool install:
+
+```bash
+uv tool install "opencode-perf-stats[web]"
+```
+
+Or run without installing:
 
 ```bash
 uvx opencode-perf-stats --help
@@ -286,16 +294,18 @@ These features are planned for upcoming releases:
 
 ## Development
 
+Python 3.12 is pinned in `.python-version`; dependencies are locked in `uv.lock`.
+
 ```bash
 git clone https://github.com/mtsanaissi/opencode-perf-stats.git
 cd opencode-perf-stats
-pip install -e ".[web]"
+uv sync --extra web     # creates .venv from uv.lock (includes the dev group)
 
 # Run tests
-python -m pytest tests/
+uv run pytest tests/
 
 # Run the tool
-opencode-perf-stats --help
+uv run opencode-perf-stats --help
 ```
 
 ## Contributing
@@ -303,9 +313,9 @@ opencode-perf-stats --help
 Contributions are welcome! Here's how to get started:
 
 1. Fork the repository and create a feature branch.
-2. Install development dependencies: `pip install -e ".[web]"`
+2. Install development dependencies: `uv sync --extra web`
 3. Make your changes and add tests if applicable.
-4. Run the test suite: `python -m pytest tests/`
+4. Run the test suite: `uv run pytest tests/`
 5. Open a pull request against `main`.
 
 For bugs and feature requests, please [open an issue](https://github.com/mtsanaissi/opencode-perf-stats/issues).
